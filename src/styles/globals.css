@@ -49,6 +49,10 @@ html, body, #root {
    and the visual position would be out of sync). */
 .xterm {
   height: 100% !important;
+  /* FitAddon reads .xterm padding and subtracts it from the parent
+     width before calculating cols. This small right padding prevents
+     a 1-col overcount that causes TUI border lines to wrap. */
+  padding-right: 2px;
 }
 .xterm-viewport::-webkit-scrollbar {
   width: 6px;
