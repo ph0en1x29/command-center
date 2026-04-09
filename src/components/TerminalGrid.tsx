@@ -108,11 +108,22 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
     );
   }
 
-  // ── Focus: single full-bleed panel ────────────────────────────────────
+  // ── Focus: render ALL sessions, hide inactive ones with CSS so xterm
+  //    instances stay alive across tab switches (no WebGL re-init, no
+  //    transcript reload, no blank screen). ──────────────────────────────
   if (layoutMode === "focus" || visibleSessions.length === 1) {
+    const allSessions = Array.from(sessions.values());
+    const activeId = visibleSessions[0]?.id;
     return (
-      <div className="flex-1 p-1.5 bg-surface-0 min-h-0">
-        {renderPanel(visibleSessions[0], false)}
+      <div className="flex-1 p-1.5 bg-surface-0 min-h-0 relative">
+        {allSessions.map((s) => (
+          <div
+            key={s.id}
+            className={`absolute inset-0 ${s.id === activeId ? "" : "invisible pointer-events-none"}`}
+          >
+            {renderPanel(s, false)}
+          </div>
+        ))}
       </div>
     );
   }

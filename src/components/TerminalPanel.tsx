@@ -130,12 +130,7 @@ export function TerminalPanel({
 
   useEffect(() => {
     initTerminal();
-    // Reload transcript so the terminal isn't blank after a layout switch
-    // (which unmounts/remounts the panel, destroying the old xterm instance).
-    readTranscript(session.id).then((t) => {
-      if (t) write(t);
-    }).catch(() => {});
-  }, [initTerminal, session.id, write, readTranscript]);
+  }, [initTerminal]);
 
   useEffect(() => {
     registerWriter?.(session.id, write);
@@ -174,6 +169,7 @@ export function TerminalPanel({
   useEffect(() => {
     if (isActive) {
       setTimeout(() => {
+        fit();
         focus();
         markViewed(session.id);
       }, 50);
