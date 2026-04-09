@@ -156,13 +156,13 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
     const allSessions = Array.from(sessions.values());
     const activeId = visibleSessions[0]?.id;
     return (
-      <div className="flex-1 p-1.5 bg-surface-0 min-h-0 relative">
+      <div className="flex-1 bg-surface-0 min-h-0 relative">
         {allSessions.map((s) => {
           const active = s.id === activeId;
           return (
             <div
               key={s.id}
-              className="absolute inset-0"
+              className="absolute inset-1.5"
               style={{
                 opacity: active ? 1 : 0,
                 pointerEvents: active ? "auto" : "none",
