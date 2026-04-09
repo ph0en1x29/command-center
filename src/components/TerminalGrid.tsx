@@ -108,9 +108,10 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
     );
   }
 
-  // ── Focus: render ALL sessions, hide inactive ones with CSS so xterm
-  //    instances stay alive across tab switches (no WebGL re-init, no
-  //    transcript reload, no blank screen). ──────────────────────────────
+  // ── Focus: render ALL sessions stacked with z-index, so xterm WebGL
+  //    contexts stay alive (visibility:hidden kills WebGL canvases).
+  //    Active panel is on top; inactive ones are behind but still
+  //    "visible" to the GPU so they keep rendering. ─────────────────────
   if (layoutMode === "focus" || visibleSessions.length === 1) {
     const allSessions = Array.from(sessions.values());
     const activeId = visibleSessions[0]?.id;
@@ -119,7 +120,11 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
         {allSessions.map((s) => (
           <div
             key={s.id}
-            className={`absolute inset-0 ${s.id === activeId ? "" : "invisible pointer-events-none"}`}
+            className={`absolute inset-0 ${
+              s.id === activeId
+                ? "z-10"
+                : "z-0 pointer-events-none"
+            }`}
           >
             {renderPanel(s, false)}
           </div>
