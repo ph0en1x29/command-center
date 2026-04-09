@@ -3,7 +3,7 @@
 All notable changes to Command Center are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [0.1.1] - 2026-04-09
+## [26.4.9] - 2026-04-09
 
 ### Fixed
 
