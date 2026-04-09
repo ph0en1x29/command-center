@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { PanelGroup, Panel, PanelResizeHandle } from "react-resizable-panels";
 import { useSessionStore } from "../store/sessions";
 import { TerminalPanel } from "./TerminalPanel";
@@ -83,6 +83,29 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
     );
   }
 
+  // ── Slot overrides: maps slot index → session id for split/grid pickers ──
+  const [slotOverrides, setSlotOverrides] = useState<Map<number, string>>(new Map());
+
+  const handleSwap = useCallback((slotIndex: number, newSessionId: string) => {
+    setSlotOverrides((prev) => {
+      const next = new Map(prev);
+      next.set(slotIndex, newSessionId);
+      return next;
+    });
+  }, []);
+
+  // Resolve which session to show in a given slot (override or default)
+  const resolveSlot = useCallback(
+    (slotIndex: number, defaultSession: SessionInfo | undefined): SessionInfo | undefined => {
+      const overrideId = slotOverrides.get(slotIndex);
+      if (overrideId) {
+        return sessions.get(overrideId) ?? defaultSession;
+      }
+      return defaultSession;
+    },
+    [slotOverrides, sessions]
+  );
+
   const renderPanel = (session: SessionInfo, compact: boolean) => (
     <TerminalPanel
       key={session.id}
@@ -92,6 +115,20 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
       onFocus={() => setActiveSession(session.id)}
       registerWriter={register}
       unregisterWriter={unregister}
+    />
+  );
+
+  // Panel with session-picker dropdown (for split/grid layouts)
+  const renderPanelWithPicker = (session: SessionInfo, compact: boolean, slotIndex: number) => (
+    <TerminalPanel
+      key={`slot-${slotIndex}-${session.id}`}
+      session={session}
+      isActive={activeSessionId === session.id}
+      compact={compact}
+      onFocus={() => setActiveSession(session.id)}
+      registerWriter={register}
+      unregisterWriter={unregister}
+      onSwapSession={(newId) => handleSwap(slotIndex, newId)}
     />
   );
 
@@ -108,29 +145,41 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
     );
   }
 
-  // ── Focus: single full-bleed panel. Only the active session is rendered.
-  //    On switch, the old panel unmounts and the new one mounts fresh —
-  //    TerminalPanel reloads the tail of the transcript so previous output
-  //    is visible immediately. No WebGL = no context-loss blanking. ──────
+  // ── Focus: render ALL sessions, hide inactive with display:none.
+  //    Without WebGL, the canvas renderer survives display:none — it just
+  //    pauses rendering. On activate, TerminalPanel calls fit()+refresh()
+  //    to resume. Panels stay mounted so xterm instances, scrollback, and
+  //    output handlers are never destroyed. ──────────────────────────────
   if (layoutMode === "focus" || visibleSessions.length === 1) {
+    const allSessions = Array.from(sessions.values());
+    const activeId = visibleSessions[0]?.id;
     return (
-      <div className="flex-1 p-1.5 bg-surface-0 min-h-0">
-        {renderPanel(visibleSessions[0], false)}
+      <div className="flex-1 p-1.5 bg-surface-0 min-h-0 flex flex-col">
+        {allSessions.map((s) => (
+          <div
+            key={s.id}
+            style={{ display: s.id === activeId ? "flex" : "none", flex: 1, minHeight: 0 }}
+          >
+            {renderPanel(s, false)}
+          </div>
+        ))}
       </div>
     );
   }
 
   // ── Split (side-by-side) ──────────────────────────────────────────────
   if (layoutMode === "split" || (layoutMode !== "vsplit" && visibleSessions.length === 2)) {
+    const s0 = resolveSlot(0, visibleSessions[0]);
+    const s1 = resolveSlot(1, visibleSessions[1] ?? visibleSessions[0]);
     return (
       <div className="flex-1 p-1.5 bg-surface-0 min-h-0">
         <PanelGroup direction="horizontal" autoSaveId="cc:split" className="h-full">
           <Panel defaultSize={50} minSize={15}>
-            {renderPanel(visibleSessions[0], false)}
+            {s0 && renderPanelWithPicker(s0, false, 0)}
           </Panel>
           <VHandle />
           <Panel defaultSize={50} minSize={15}>
-            {renderPanel(visibleSessions[1], false)}
+            {s1 && renderPanelWithPicker(s1, false, 1)}
           </Panel>
         </PanelGroup>
       </div>
@@ -139,15 +188,17 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
 
   // ── VSplit (top/bottom) ───────────────────────────────────────────────
   if (layoutMode === "vsplit") {
+    const s0 = resolveSlot(0, visibleSessions[0]);
+    const s1 = resolveSlot(1, visibleSessions[1] ?? visibleSessions[0]);
     return (
       <div className="flex-1 p-1.5 bg-surface-0 min-h-0">
         <PanelGroup direction="vertical" autoSaveId="cc:vsplit" className="h-full">
           <Panel defaultSize={50} minSize={15}>
-            {renderPanel(visibleSessions[0], false)}
+            {s0 && renderPanelWithPicker(s0, false, 0)}
           </Panel>
           <HHandle />
           <Panel defaultSize={50} minSize={15}>
-            {renderPanel(visibleSessions[1], false)}
+            {s1 && renderPanelWithPicker(s1, false, 1)}
           </Panel>
         </PanelGroup>
       </div>
@@ -156,7 +207,10 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
 
   // ── Grid (2×2): vertical group of two horizontal groups ───────────────
   if (layoutMode === "grid") {
-    const [a, b, c, d] = visibleSessions;
+    const a = resolveSlot(0, visibleSessions[0]);
+    const b = resolveSlot(1, visibleSessions[1]);
+    const c = resolveSlot(2, visibleSessions[2]);
+    const d = resolveSlot(3, visibleSessions[3]);
     return (
       <div className="flex-1 p-1.5 bg-surface-0 min-h-0">
         <PanelGroup
@@ -171,13 +225,13 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
               className="h-full"
             >
               <Panel defaultSize={50} minSize={15}>
-                {a && renderPanel(a, true)}
+                {a && renderPanelWithPicker(a, true, 0)}
               </Panel>
               {b && (
                 <>
                   <VHandle />
                   <Panel defaultSize={50} minSize={15}>
-                    {renderPanel(b, true)}
+                    {renderPanelWithPicker(b, true, 1)}
                   </Panel>
                 </>
               )}
@@ -194,13 +248,13 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
                 >
                   {c && (
                     <Panel defaultSize={50} minSize={15}>
-                      {renderPanel(c, true)}
+                      {renderPanelWithPicker(c, true, 2)}
                     </Panel>
                   )}
                   {c && d && <VHandle />}
                   {d && (
                     <Panel defaultSize={50} minSize={15}>
-                      {renderPanel(d, true)}
+                      {renderPanelWithPicker(d, true, 3)}
                     </Panel>
                   )}
                 </PanelGroup>

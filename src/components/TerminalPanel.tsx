@@ -1,5 +1,5 @@
 import { useEffect, useRef, useMemo, useState, useCallback } from "react";
-import { Coffee, Clock, Copy, Radio, RotateCw, Settings, X as XIcon } from "lucide-react";
+import { ChevronDown, Coffee, Clock, Copy, Radio, RotateCw, Settings, X as XIcon } from "lucide-react";
 import { useTerminal } from "../hooks/useTerminal";
 import { useSession } from "../hooks/useSession";
 import { useTick } from "../hooks/useTick";
@@ -23,6 +23,8 @@ interface TerminalPanelProps {
   onFocus: () => void;
   registerWriter?: (id: string, writer: (data: string) => void) => void;
   unregisterWriter?: (id: string) => void;
+  /** Called when the user picks a different session from the header dropdown. */
+  onSwapSession?: (newSessionId: string) => void;
 }
 
 export function TerminalPanel({
@@ -32,6 +34,7 @@ export function TerminalPanel({
   onFocus,
   registerWriter,
   unregisterWriter,
+  onSwapSession,
 }: TerminalPanelProps) {
   const { writeToSession, resizeSession, setKeepAwake, readTranscript, readTranscriptTail } = useSession();
   const { broadcastMode, broadcastTargets, lastSeenBytes, markViewed } = useSessionStore();
@@ -40,6 +43,9 @@ export function TerminalPanel({
 
   // Settings panel state
   const [showSettings, setShowSettings] = useState(false);
+  // Session picker dropdown
+  const [showPicker, setShowPicker] = useState(false);
+  const allSessions = Array.from(useSessionStore.getState().sessions.values());
 
   // Dangerous-command interception state
   const lineBuf = useRef("");
@@ -120,7 +126,7 @@ export function TerminalPanel({
     setPendingDangerous(null);
   }, [session.id, writeToSession]);
 
-  const { terminalRef, initTerminal, write, fit, focus } = useTerminal({
+  const { terminalRef, initTerminal, write, fit, focus, terminal } = useTerminal({
     fontSize: compact ? 9 : 12,
     onData,
     onResize: (cols, rows) => {
@@ -130,13 +136,7 @@ export function TerminalPanel({
 
   useEffect(() => {
     initTerminal();
-    // Reload the tail of the transcript so the terminal isn't blank after
-    // a layout switch (which unmounts and remounts the panel). Only loads
-    // the last 32 KB — fast enough to not freeze the UI.
-    readTranscriptTail(session.id).then((tail) => {
-      if (tail) write(tail);
-    }).catch(() => {});
-  }, [initTerminal, session.id, write, readTranscriptTail]);
+  }, [initTerminal]);
 
   useEffect(() => {
     registerWriter?.(session.id, write);
@@ -174,11 +174,16 @@ export function TerminalPanel({
 
   useEffect(() => {
     if (isActive) {
-      setTimeout(() => {
+      // After display changes from none → flex, the canvas needs to be
+      // resized and re-rendered. fit() recalculates dimensions, refresh()
+      // forces the canvas renderer to repaint all rows.
+      const t = setTimeout(() => {
         fit();
+        try { terminal.current?.refresh(0, terminal.current.rows - 1); } catch {}
         focus();
         markViewed(session.id);
       }, 50);
+      return () => clearTimeout(t);
     }
   }, [isActive, focus, session.id, markViewed]);
 
@@ -265,9 +270,44 @@ export function TerminalPanel({
       <div className="session-drag-handle h-8 px-3 flex items-center justify-between bg-surface-2 border-b border-border shrink-0 cursor-grab active:cursor-grabbing gap-3">
         <div className="flex items-center gap-2 min-w-0">
           <StatusDot status={session.status} size="sm" />
-          <span className="text-[11px] font-medium text-white/60 truncate max-w-[160px]">
-            {session.config.name}
-          </span>
+          {onSwapSession ? (
+            <div className="relative">
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowPicker((v) => !v); }}
+                onMouseDown={(e) => e.stopPropagation()}
+                className="flex items-center gap-0.5 text-[11px] font-medium text-white/60 hover:text-white/90 transition-colors cursor-pointer truncate max-w-[160px]"
+              >
+                {session.config.name}
+                <ChevronDown size={10} className="shrink-0 opacity-50" />
+              </button>
+              {showPicker && (
+                <div className="absolute top-full left-0 mt-1 z-50 bg-surface-2 border border-border rounded-lg shadow-xl py-1 min-w-[160px] max-h-[200px] overflow-y-auto">
+                  {allSessions.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowPicker(false);
+                        if (s.id !== session.id) onSwapSession(s.id);
+                      }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      className={`w-full px-3 py-1.5 text-left text-[11px] truncate cursor-pointer transition-colors ${
+                        s.id === session.id
+                          ? "text-accent bg-accent/10"
+                          : "text-white/60 hover:text-white hover:bg-white/5"
+                      }`}
+                    >
+                      {s.config.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <span className="text-[11px] font-medium text-white/60 truncate max-w-[160px]">
+              {session.config.name}
+            </span>
+          )}
           {tagAccent && session.config.tag && (
             <span
               className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider"
