@@ -142,6 +142,22 @@ export function useTerminal(options: UseTerminalOptions = {}) {
     termRef.current?.focus();
   }, []);
 
+  // Force the WebGL renderer to re-attach after the terminal was off-screen.
+  // The WebGL addon has an internal _isAttached flag that becomes false when
+  // the canvas isn't visible. renderRows() silently returns without drawing
+  // until refresh() triggers the re-attachment check.
+  const reactivate = useCallback(() => {
+    const term = termRef.current;
+    if (!term) return;
+    try {
+      fitRef.current?.fit();
+      // clearTextureAtlas rebuilds the glyph cache + requests a full redraw
+      term.clearTextureAtlas();
+      // refresh forces renderRows() which checks _isAttached and re-enables it
+      term.refresh(0, term.rows - 1);
+    } catch {}
+  }, []);
+
   const dispose = useCallback(() => {
     try {
       termRef.current?.dispose();
@@ -166,6 +182,7 @@ export function useTerminal(options: UseTerminalOptions = {}) {
     write,
     fit,
     focus,
+    reactivate,
     dispose,
     terminal: termRef,
   };

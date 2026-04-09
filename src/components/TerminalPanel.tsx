@@ -120,7 +120,7 @@ export function TerminalPanel({
     setPendingDangerous(null);
   }, [session.id, writeToSession]);
 
-  const { terminalRef, initTerminal, write, fit, focus } = useTerminal({
+  const { terminalRef, initTerminal, write, fit, focus, reactivate } = useTerminal({
     fontSize: compact ? 9 : 12,
     onData,
     onResize: (cols, rows) => {
@@ -168,15 +168,18 @@ export function TerminalPanel({
 
   useEffect(() => {
     if (isActive) {
-      // First fit after display changes from none → block
-      setTimeout(() => {
-        fit();
+      // When switching tabs, the WebGL renderer's _isAttached flag is
+      // false because the canvas was off-screen. We must call reactivate()
+      // which runs fit() + clearTextureAtlas() + refresh() to force the
+      // re-attachment check and rebuild the canvas.
+      const t1 = setTimeout(() => {
+        reactivate();
         focus();
         markViewed(session.id);
       }, 50);
-      // Second fit after layout fully settles
-      const t2 = setTimeout(() => fit(), 200);
-      return () => clearTimeout(t2);
+      // Second pass after layout fully settles
+      const t2 = setTimeout(() => reactivate(), 200);
+      return () => { clearTimeout(t1); clearTimeout(t2); };
     }
   }, [isActive, focus, session.id, markViewed]);
 
