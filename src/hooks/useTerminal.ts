@@ -45,13 +45,20 @@ export function useTerminal(options: UseTerminalOptions = {}) {
       const term = termRef.current;
       if (!addon || !term) return;
 
-      // Let FitAddon calculate and resize normally
-      addon.fit();
+      // Use proposeDimensions() to CALCULATE without resizing.
+      // Then do ONE resize with corrected cols. This prevents
+      // the double-SIGWINCH race: fitAddon.fit() would resize to N,
+      // the remote draws at N cols, then we resize to N-2 but the
+      // N-col output already arrived and wraps in the N-2 grid.
+      const dims = addon.proposeDimensions();
+      if (!dims) return;
 
-      // Then shrink by 2 cols to prevent overflow. FitAddon's calculation
-      // can be off due to subpixel rounding and scrollbar measurement.
-      if (term.cols > 4) {
-        term.resize(term.cols - 2, term.rows);
+      const cols = Math.max(2, dims.cols - 2);
+      const rows = Math.max(1, dims.rows);
+
+      if (cols !== term.cols || rows !== term.rows) {
+        (term as any)._core._renderService.clear();
+        term.resize(cols, rows);
       }
     } catch {}
   }, []);
