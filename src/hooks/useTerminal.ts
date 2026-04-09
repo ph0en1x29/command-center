@@ -41,27 +41,7 @@ export function useTerminal(options: UseTerminalOptions = {}) {
 
   const fit = useCallback(() => {
     try {
-      const term = termRef.current;
-      const container = terminalRef.current;
-      if (!term || !container) return;
-
-      const core = (term as any)._core;
-      const dims = core._renderService?.dimensions;
-      if (!dims || dims.css.cell.width === 0 || dims.css.cell.height === 0) return;
-
-      // No custom scrollbar CSS — using native macOS overlay scrollbar
-      // which takes 0px layout space. No scrollbar subtraction needed.
-      const rect = container.getBoundingClientRect();
-      const availableWidth = rect.width;
-      const availableHeight = rect.height;
-
-      const cols = Math.max(2, Math.floor(availableWidth / dims.css.cell.width) - 1);
-      const rows = Math.max(1, Math.floor(availableHeight / dims.css.cell.height));
-
-      if (cols !== term.cols || rows !== term.rows) {
-        core._renderService.clear();
-        term.resize(cols, rows);
-      }
+      fitRef.current?.fit();
     } catch {}
   }, []);
 
