@@ -108,19 +108,22 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
     );
   }
 
-  // ── Focus: render ALL sessions, show only the active one. Inactive
-  //    panels use display:none (Tailwind "hidden") so React keeps them
-  //    mounted and xterm refs stay alive. When a panel becomes active,
-  //    the isActive effect in TerminalPanel calls fit() to resize. ──────
+  // ── Focus: render ALL sessions at full size using absolute positioning.
+  //    Inactive panels are moved off-screen with CSS transform instead of
+  //    display:none or visibility:hidden — both kill WebGL canvases.
+  //    Transform is GPU-composited: the terminal keeps rendering at full
+  //    size, it's just physically outside the viewport. The parent clips
+  //    with overflow:hidden so nothing bleeds into the layout. ───────────
   if (layoutMode === "focus" || visibleSessions.length === 1) {
     const allSessions = Array.from(sessions.values());
     const activeId = visibleSessions[0]?.id;
     return (
-      <div className="flex-1 p-1.5 bg-surface-0 min-h-0 flex flex-col">
+      <div className="flex-1 p-1.5 bg-surface-0 min-h-0 relative overflow-hidden">
         {allSessions.map((s) => (
           <div
             key={s.id}
-            className={s.id === activeId ? "flex-1 min-h-0" : "hidden"}
+            style={s.id === activeId ? undefined : { transform: "translateX(-200%)" }}
+            className="absolute inset-0"
           >
             {renderPanel(s, false)}
           </div>
