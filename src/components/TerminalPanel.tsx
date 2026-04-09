@@ -148,11 +148,17 @@ export function TerminalPanel({
   useEffect(() => {
     if (!containerRef.current) return;
     const observer = new ResizeObserver(() => {
-      requestAnimationFrame(() => fit());
+      requestAnimationFrame(() => {
+        fit();
+        // After fit, force the canvas to repaint all rows. This is
+        // critical when the container transitions from display:none to
+        // visible — the buffer has data but the canvas hasn't painted.
+        try { terminal.current?.refresh(0, terminal.current.rows - 1); } catch {}
+      });
     });
     observer.observe(containerRef.current);
     return () => observer.disconnect();
-  }, [fit]);
+  }, [fit, terminal]);
 
   // Force-propagate the actual terminal size to the PTY shortly after mount.
   // The PTY starts at 80x24 but the xterm panel may be larger. The initial
