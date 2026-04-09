@@ -39,39 +39,19 @@ export function useTerminal(options: UseTerminalOptions = {}) {
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
 
-  // Custom fit that bypasses FitAddon's resize entirely.
-  // FitAddon calls terminal.resize(N) then we'd call resize(N-1),
-  // producing TWO SIGWINCH signals where the first (wrong) one can
-  // win the race. Instead, we calculate dimensions ourselves using
-  // getBoundingClientRect (precise floats, no parseInt truncation)
-  // and issue a single resize(N-1) call.
   const fit = useCallback(() => {
     try {
+      const addon = fitRef.current;
       const term = termRef.current;
-      const container = terminalRef.current;
-      if (!term || !container) return;
+      if (!addon || !term) return;
 
-      const core = (term as any)._core;
-      const dims = core._renderService?.dimensions;
-      if (!dims || dims.css.cell.width === 0 || dims.css.cell.height === 0) return;
+      // Let FitAddon calculate and resize normally
+      addon.fit();
 
-      // Hardcode scrollbar width to match our CSS (6px) — xterm's
-      // viewport.scrollBarWidth can return 0 if measured before the
-      // scrollbar appears, causing cols to be too wide.
-      const scrollbarWidth = 6;
-
-      const rect = container.getBoundingClientRect();
-      const availableWidth = rect.width - scrollbarWidth;
-      const availableHeight = rect.height;
-
-      // Subtract 2 cols: 1 for subpixel rounding between CSS layout
-      // and canvas rendering, 1 for scrollbar measurement uncertainty.
-      const cols = Math.max(2, Math.floor(availableWidth / dims.css.cell.width) - 2);
-      const rows = Math.max(1, Math.floor(availableHeight / dims.css.cell.height));
-
-      if (cols !== term.cols || rows !== term.rows) {
-        core._renderService.clear();
-        term.resize(cols, rows);
+      // Then shrink by 2 cols to prevent overflow. FitAddon's calculation
+      // can be off due to subpixel rounding and scrollbar measurement.
+      if (term.cols > 4) {
+        term.resize(term.cols - 2, term.rows);
       }
     } catch {}
   }, []);
@@ -99,9 +79,6 @@ export function useTerminal(options: UseTerminalOptions = {}) {
       macOptionIsMeta: true,
     });
 
-    // FitAddon is still loaded so xterm internals (viewport, render
-    // service) are initialized, but we never call fitAddon.fit() —
-    // we use our own fit() that issues a single correct resize.
     const fitAddon = new FitAddon();
     const webLinksAddon = new WebLinksAddon();
 
@@ -112,10 +89,11 @@ export function useTerminal(options: UseTerminalOptions = {}) {
     termRef.current = term;
     fitRef.current = fitAddon;
 
-    // Fit once after fonts are loaded.
     document.fonts.ready.then(() => {
       requestAnimationFrame(() => {
-        term.options.fontFamily = term.options.fontFamily;
+        try {
+          term.options.fontFamily = term.options.fontFamily;
+        } catch {}
         fit();
       });
     });
@@ -148,9 +126,7 @@ export function useTerminal(options: UseTerminalOptions = {}) {
   }, []);
 
   useEffect(() => {
-    return () => {
-      dispose();
-    };
+    return () => dispose();
   }, [dispose]);
 
   return {
