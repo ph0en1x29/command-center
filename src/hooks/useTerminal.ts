@@ -55,19 +55,18 @@ export function useTerminal(options: UseTerminalOptions = {}) {
       const dims = core._renderService?.dimensions;
       if (!dims || dims.css.cell.width === 0 || dims.css.cell.height === 0) return;
 
-      const scrollbarWidth = core.viewport?.scrollBarWidth ?? 0;
+      // Hardcode scrollbar width to match our CSS (6px) — xterm's
+      // viewport.scrollBarWidth can return 0 if measured before the
+      // scrollbar appears, causing cols to be too wide.
+      const scrollbarWidth = 6;
 
-      // getBoundingClientRect gives precise floating-point px — no
-      // parseInt truncation like FitAddon uses.
       const rect = container.getBoundingClientRect();
       const availableWidth = rect.width - scrollbarWidth;
       const availableHeight = rect.height;
 
-      // Subtract 1 col to prevent subpixel rounding overflow at the
-      // right edge. This matches how real terminal emulators handle
-      // fractional remainders — they leave a small gap rather than
-      // risk characters overflowing.
-      const cols = Math.max(2, Math.floor(availableWidth / dims.css.cell.width) - 1);
+      // Subtract 2 cols: 1 for subpixel rounding between CSS layout
+      // and canvas rendering, 1 for scrollbar measurement uncertainty.
+      const cols = Math.max(2, Math.floor(availableWidth / dims.css.cell.width) - 2);
       const rows = Math.max(1, Math.floor(availableHeight / dims.css.cell.height));
 
       if (cols !== term.cols || rows !== term.rows) {
