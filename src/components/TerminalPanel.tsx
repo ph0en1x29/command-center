@@ -144,7 +144,12 @@ export function TerminalPanel({
 
   useEffect(() => {
     initTerminal();
-  }, [initTerminal]);
+    // Load recent output so the terminal isn't blank after remount
+    // (e.g. tab switch in Focus mode). Only the last 32 KB — instant.
+    readTranscriptTail(session.id).then((tail) => {
+      if (tail) write(tail);
+    }).catch(() => {});
+  }, [initTerminal, session.id, write, readTranscriptTail]);
 
   useEffect(() => {
     registerWriter?.(session.id, write);

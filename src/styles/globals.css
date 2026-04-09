@@ -50,11 +50,6 @@ html, body, #root {
 .xterm {
   height: 100% !important;
 }
-/* Ensure xterm's internal viewport can scroll (not blocked by parent
-   overflow:hidden from react-resizable-panels). */
-.xterm-viewport {
-  overflow-y: auto !important;
-}
 .xterm-viewport::-webkit-scrollbar {
   width: 6px;
 }

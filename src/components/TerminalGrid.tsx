@@ -145,34 +145,13 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
     );
   }
 
-  // ── Focus: all sessions stacked with absolute positioning + opacity.
-  //    Every panel is fully rendered at full size (not display:none, not
-  //    visibility:hidden, not transformed off-screen — all of those cause
-  //    xterm's _isPaused flag to stay true and the canvas never repaints).
-  //    With opacity:0, the element has real dimensions, IntersectionObserver
-  //    sees it as visible, and the canvas actively renders. Switching tabs
-  //    just flips opacity — the content is already painted. ─────────────
+  // ── Focus: single full-bleed panel, no absolute positioning.
+  //    On tab switch the panel remounts, loads transcript tail, and
+  //    the canvas renderer re-creates instantly (no WebGL context issues).
   if (layoutMode === "focus" || visibleSessions.length === 1) {
-    const allSessions = Array.from(sessions.values());
-    const activeId = visibleSessions[0]?.id;
     return (
-      <div className="flex-1 bg-surface-0 min-h-0 relative">
-        {allSessions.map((s) => {
-          const active = s.id === activeId;
-          return (
-            <div
-              key={s.id}
-              className="absolute inset-1.5"
-              style={{
-                opacity: active ? 1 : 0,
-                pointerEvents: active ? "auto" : "none",
-                zIndex: active ? 1 : 0,
-              }}
-            >
-              {renderPanel(s, false)}
-            </div>
-          );
-        })}
+      <div className="flex-1 p-1.5 bg-surface-0 min-h-0">
+        {renderPanel(visibleSessions[0], false)}
       </div>
     );
   }
