@@ -168,11 +168,15 @@ export function TerminalPanel({
 
   useEffect(() => {
     if (isActive) {
+      // First fit after display changes from none → block
       setTimeout(() => {
         fit();
         focus();
         markViewed(session.id);
       }, 50);
+      // Second fit after layout fully settles
+      const t2 = setTimeout(() => fit(), 200);
+      return () => clearTimeout(t2);
     }
   }, [isActive, focus, session.id, markViewed]);
 

@@ -108,23 +108,19 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
     );
   }
 
-  // ── Focus: render ALL sessions stacked with z-index, so xterm WebGL
-  //    contexts stay alive (visibility:hidden kills WebGL canvases).
-  //    Active panel is on top; inactive ones are behind but still
-  //    "visible" to the GPU so they keep rendering. ─────────────────────
+  // ── Focus: render ALL sessions, show only the active one. Inactive
+  //    panels use display:none (Tailwind "hidden") so React keeps them
+  //    mounted and xterm refs stay alive. When a panel becomes active,
+  //    the isActive effect in TerminalPanel calls fit() to resize. ──────
   if (layoutMode === "focus" || visibleSessions.length === 1) {
     const allSessions = Array.from(sessions.values());
     const activeId = visibleSessions[0]?.id;
     return (
-      <div className="flex-1 p-1.5 bg-surface-0 min-h-0 relative">
+      <div className="flex-1 p-1.5 bg-surface-0 min-h-0 flex flex-col">
         {allSessions.map((s) => (
           <div
             key={s.id}
-            className={`absolute inset-0 ${
-              s.id === activeId
-                ? "z-10"
-                : "z-0 pointer-events-none"
-            }`}
+            className={s.id === activeId ? "flex-1 min-h-0" : "hidden"}
           >
             {renderPanel(s, false)}
           </div>
