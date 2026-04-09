@@ -108,26 +108,14 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
     );
   }
 
-  // ── Focus: render ALL sessions at full size using absolute positioning.
-  //    Inactive panels are moved off-screen with CSS transform instead of
-  //    display:none or visibility:hidden — both kill WebGL canvases.
-  //    Transform is GPU-composited: the terminal keeps rendering at full
-  //    size, it's just physically outside the viewport. The parent clips
-  //    with overflow:hidden so nothing bleeds into the layout. ───────────
+  // ── Focus: single full-bleed panel. Only the active session is rendered.
+  //    On switch, the old panel unmounts and the new one mounts fresh —
+  //    TerminalPanel reloads the tail of the transcript so previous output
+  //    is visible immediately. No WebGL = no context-loss blanking. ──────
   if (layoutMode === "focus" || visibleSessions.length === 1) {
-    const allSessions = Array.from(sessions.values());
-    const activeId = visibleSessions[0]?.id;
     return (
-      <div className="flex-1 p-1.5 bg-surface-0 min-h-0 relative overflow-hidden">
-        {allSessions.map((s) => (
-          <div
-            key={s.id}
-            style={s.id === activeId ? undefined : { transform: "translateX(-200%)" }}
-            className="absolute inset-0"
-          >
-            {renderPanel(s, false)}
-          </div>
-        ))}
+      <div className="flex-1 p-1.5 bg-surface-0 min-h-0">
+        {renderPanel(visibleSessions[0], false)}
       </div>
     );
   }

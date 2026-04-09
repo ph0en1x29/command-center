@@ -33,7 +33,7 @@ export function TerminalPanel({
   registerWriter,
   unregisterWriter,
 }: TerminalPanelProps) {
-  const { writeToSession, resizeSession, setKeepAwake, readTranscript } = useSession();
+  const { writeToSession, resizeSession, setKeepAwake, readTranscript, readTranscriptTail } = useSession();
   const { broadcastMode, broadcastTargets, lastSeenBytes, markViewed } = useSessionStore();
   const containerRef = useRef<HTMLDivElement>(null);
   useTick(1000);
@@ -120,7 +120,7 @@ export function TerminalPanel({
     setPendingDangerous(null);
   }, [session.id, writeToSession]);
 
-  const { terminalRef, initTerminal, write, fit, focus, reactivate } = useTerminal({
+  const { terminalRef, initTerminal, write, fit, focus } = useTerminal({
     fontSize: compact ? 9 : 12,
     onData,
     onResize: (cols, rows) => {
@@ -130,7 +130,13 @@ export function TerminalPanel({
 
   useEffect(() => {
     initTerminal();
-  }, [initTerminal]);
+    // Reload the tail of the transcript so the terminal isn't blank after
+    // a layout switch (which unmounts and remounts the panel). Only loads
+    // the last 32 KB — fast enough to not freeze the UI.
+    readTranscriptTail(session.id).then((tail) => {
+      if (tail) write(tail);
+    }).catch(() => {});
+  }, [initTerminal, session.id, write, readTranscriptTail]);
 
   useEffect(() => {
     registerWriter?.(session.id, write);
@@ -168,18 +174,11 @@ export function TerminalPanel({
 
   useEffect(() => {
     if (isActive) {
-      // When switching tabs, the WebGL renderer's _isAttached flag is
-      // false because the canvas was off-screen. We must call reactivate()
-      // which runs fit() + clearTextureAtlas() + refresh() to force the
-      // re-attachment check and rebuild the canvas.
-      const t1 = setTimeout(() => {
-        reactivate();
+      setTimeout(() => {
+        fit();
         focus();
         markViewed(session.id);
       }, 50);
-      // Second pass after layout fully settles
-      const t2 = setTimeout(() => reactivate(), 200);
-      return () => { clearTimeout(t1); clearTimeout(t2); };
     }
   }, [isActive, focus, session.id, markViewed]);
 

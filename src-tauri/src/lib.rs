@@ -1121,6 +1121,29 @@ fn read_transcript(app: AppHandle, session_id: String) -> Result<String, String>
     std::fs::read_to_string(path).map_err(|e| e.to_string())
 }
 
+/// Read only the tail of the transcript (last `max_bytes`, default 32 KB).
+/// This is fast enough to call on every tab switch without freezing the UI.
+#[tauri::command]
+fn read_transcript_tail(
+    app: AppHandle,
+    session_id: String,
+    max_bytes: Option<u64>,
+) -> Result<String, String> {
+    let path = transcript_path(&app, &session_id).ok_or("No transcript path")?;
+    let max = max_bytes.unwrap_or(32_768);
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    let file_len = meta.len();
+    let offset = if file_len > max { file_len - max } else { 0 };
+
+    use std::io::Seek;
+    let mut f = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+    f.seek(std::io::SeekFrom::Start(offset)).map_err(|e| e.to_string())?;
+
+    let mut buf = Vec::with_capacity(max as usize);
+    std::io::Read::read_to_end(&mut f, &mut buf).map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
 // ── Lib entry ──────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1196,6 +1219,7 @@ pub fn run() {
             set_keep_awake,
             update_session_config,
             read_transcript,
+            read_transcript_tail,
             profiles::list_profiles,
             profiles::save_profile,
             profiles::delete_profile,

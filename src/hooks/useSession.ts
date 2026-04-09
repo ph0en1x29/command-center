@@ -112,6 +112,14 @@ export function useSession() {
     }
   }, []);
 
+  const readTranscriptTail = useCallback(async (sessionId: string): Promise<string> => {
+    try {
+      return await invoke<string>("read_transcript_tail", { sessionId });
+    } catch {
+      return "";
+    }
+  }, []);
+
   return {
     createSession,
     closeSession,
@@ -120,6 +128,7 @@ export function useSession() {
     setKeepAwake,
     updateConfig,
     readTranscript,
+    readTranscriptTail,
   };
 }
 

@@ -2,7 +2,6 @@ import { useEffect, useRef, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
-import { WebglAddon } from "@xterm/addon-webgl";
 
 interface UseTerminalOptions {
   onData?: (data: string) => void;
@@ -47,7 +46,7 @@ export function useTerminal(options: UseTerminalOptions = {}) {
     if (!terminalRef.current) return;
 
     // If a previous terminal exists (e.g. layout switch caused remount),
-    // dispose it first so we get a fresh WebGL context and canvas.
+    // dispose it first so we get a fresh canvas.
     if (termRef.current) {
       try { termRef.current.dispose(); } catch {}
       termRef.current = null;
@@ -75,28 +74,15 @@ export function useTerminal(options: UseTerminalOptions = {}) {
     term.loadAddon(webLinksAddon);
     term.open(terminalRef.current);
 
-    // Try to upgrade to WebGL renderer for ~10x perf. Fall back silently
-    // to the default canvas/DOM renderer if it can't load (e.g. headless test).
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => webgl.dispose());
-      term.loadAddon(webgl);
-    } catch {
-      // canvas renderer is fine
-    }
+    // No WebGL addon — the canvas renderer is reliable across layout
+    // switches, tab changes, and off-screen rendering. WebGL contexts
+    // get lost/evicted in multi-tab scenarios within Tauri's WebView,
+    // causing blank terminals that no re-attachment hack can fix.
 
-    // Wait for fonts (JetBrains Mono loaded via Google Fonts with display=swap)
-    // before fitting. Without this, xterm.js measures cell dimensions using a
-    // fallback monospace font, then the browser swaps in JetBrains Mono with
-    // different metrics — causing text overlap and misaligned rendering.
-    // This mirrors how Ghostty waits for stable font metrics before computing
-    // the terminal grid.
+    // Wait for fonts before fitting.
     const fitAfterFonts = () => {
       requestAnimationFrame(() => {
         try {
-          // Force xterm.js to re-measure character cells by re-assigning
-          // fontFamily. This clears the glyph atlas and recalculates all
-          // cell dimensions based on the now-loaded web font.
           term.options.fontFamily = term.options.fontFamily;
           fitAddon.fit();
         } catch {}
@@ -106,8 +92,6 @@ export function useTerminal(options: UseTerminalOptions = {}) {
     if (document.fonts.status === "loaded") {
       fitAfterFonts();
     } else {
-      // Fit immediately with whatever font is available so the terminal
-      // isn't blank, then re-fit once the real font arrives.
       requestAnimationFrame(() => {
         try { fitAddon.fit(); } catch {}
       });
@@ -142,30 +126,10 @@ export function useTerminal(options: UseTerminalOptions = {}) {
     termRef.current?.focus();
   }, []);
 
-  // Force the WebGL renderer to re-attach after the terminal was off-screen.
-  // The WebGL addon has an internal _isAttached flag that becomes false when
-  // the canvas isn't visible. renderRows() silently returns without drawing
-  // until refresh() triggers the re-attachment check.
-  const reactivate = useCallback(() => {
-    const term = termRef.current;
-    if (!term) return;
-    try {
-      fitRef.current?.fit();
-      // clearTextureAtlas rebuilds the glyph cache + requests a full redraw
-      term.clearTextureAtlas();
-      // refresh forces renderRows() which checks _isAttached and re-enables it
-      term.refresh(0, term.rows - 1);
-    } catch {}
-  }, []);
-
   const dispose = useCallback(() => {
     try {
       termRef.current?.dispose();
-    } catch {
-      // WebGL addon may throw during StrictMode double-unmount cleanup
-      // when it accesses _terminal._core._store on an already-disposed terminal.
-      // Safe to swallow — the terminal is being torn down anyway.
-    }
+    } catch {}
     termRef.current = null;
     fitRef.current = null;
   }, []);
@@ -182,7 +146,6 @@ export function useTerminal(options: UseTerminalOptions = {}) {
     write,
     fit,
     focus,
-    reactivate,
     dispose,
     terminal: termRef,
   };
