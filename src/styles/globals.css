@@ -50,12 +50,22 @@ html, body, #root {
 .xterm {
   height: 100% !important;
 }
+/* Ensure xterm's internal viewport can scroll (not blocked by parent
+   overflow:hidden from react-resizable-panels). */
+.xterm-viewport {
+  overflow-y: auto !important;
+}
 .xterm-viewport::-webkit-scrollbar {
   width: 6px;
 }
 .xterm-viewport::-webkit-scrollbar-thumb {
   background: #ffffff1a;
   border-radius: 3px;
+}
+
+/* react-resizable-panels: let children handle their own scroll */
+[data-panel] {
+  overflow: visible !important;
 }
 
 /* Status dot animation */

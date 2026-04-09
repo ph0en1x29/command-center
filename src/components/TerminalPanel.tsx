@@ -47,6 +47,14 @@ export function TerminalPanel({
   const [showPicker, setShowPicker] = useState(false);
   const allSessions = Array.from(useSessionStore.getState().sessions.values());
 
+  // Close picker on any click outside
+  useEffect(() => {
+    if (!showPicker) return;
+    const close = () => setShowPicker(false);
+    window.addEventListener("click", close);
+    return () => window.removeEventListener("click", close);
+  }, [showPicker]);
+
   // Dangerous-command interception state
   const lineBuf = useRef("");
   const [pendingDangerous, setPendingDangerous] = useState<{
@@ -276,14 +284,20 @@ export function TerminalPanel({
                 <ChevronDown size={10} className="shrink-0 opacity-50" />
               </button>
               {showPicker && (
-                <div className="absolute top-full left-0 mt-1 z-50 bg-surface-2 border border-border rounded-lg shadow-xl py-1 min-w-[160px] max-h-[200px] overflow-y-auto">
+                <div
+                  className="fixed z-[9999] bg-surface-2 border border-border rounded-lg shadow-xl py-1 min-w-[160px] max-h-[200px] overflow-y-auto"
+                  style={{
+                    top: (containerRef.current?.querySelector(".session-drag-handle")?.getBoundingClientRect().bottom ?? 0) + 2,
+                    left: containerRef.current?.querySelector(".session-drag-handle")?.getBoundingClientRect().left ?? 0,
+                  }}
+                >
                   {allSessions.map((s) => (
                     <button
                       key={s.id}
                       onClick={(e) => {
                         e.stopPropagation();
                         setShowPicker(false);
-                        if (s.id !== session.id) onSwapSession(s.id);
+                        if (s.id !== session.id) onSwapSession!(s.id);
                       }}
                       onMouseDown={(e) => e.stopPropagation()}
                       className={`w-full px-3 py-1.5 text-left text-[11px] truncate cursor-pointer transition-colors ${
