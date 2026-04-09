@@ -44,7 +44,15 @@ export function useTerminal(options: UseTerminalOptions = {}) {
   const fitRef = useRef<FitAddon | null>(null);
 
   const initTerminal = useCallback(() => {
-    if (!terminalRef.current || termRef.current) return;
+    if (!terminalRef.current) return;
+
+    // If a previous terminal exists (e.g. layout switch caused remount),
+    // dispose it first so we get a fresh WebGL context and canvas.
+    if (termRef.current) {
+      try { termRef.current.dispose(); } catch {}
+      termRef.current = null;
+      fitRef.current = null;
+    }
 
     const term = new Terminal({
       cursorBlink: true,
