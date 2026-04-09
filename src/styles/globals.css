@@ -50,13 +50,6 @@ html, body, #root {
 .xterm {
   height: 100% !important;
 }
-.xterm-viewport::-webkit-scrollbar {
-  width: 6px;
-}
-.xterm-viewport::-webkit-scrollbar-thumb {
-  background: #ffffff1a;
-  border-radius: 3px;
-}
 
 
 /* Status dot animation */

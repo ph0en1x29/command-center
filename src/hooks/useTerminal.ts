@@ -49,12 +49,10 @@ export function useTerminal(options: UseTerminalOptions = {}) {
       const dims = core._renderService?.dimensions;
       if (!dims || dims.css.cell.width === 0 || dims.css.cell.height === 0) return;
 
-      // Always reserve 6px for the scrollbar (matches our CSS).
-      // core.viewport.scrollBarWidth returns 0 when there's no
-      // scrollable content yet, but the scrollbar WILL appear once
-      // output grows, shrinking the text area and causing overflow.
+      // No custom scrollbar CSS — using native macOS overlay scrollbar
+      // which takes 0px layout space. No scrollbar subtraction needed.
       const rect = container.getBoundingClientRect();
-      const availableWidth = rect.width - 6;
+      const availableWidth = rect.width;
       const availableHeight = rect.height;
 
       const cols = Math.max(2, Math.floor(availableWidth / dims.css.cell.width) - 1);
