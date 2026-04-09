@@ -292,12 +292,14 @@ fn build_ssh_command(config: &SessionConfig, session_id: &str) -> Result<Command
     }
     if config.wrap_in_tmux {
         // Use the first 8 chars of the session UUID for a unique tmux name.
-        // This avoids collisions when two sessions share the same display name.
         let short_id = &session_id[..8.min(session_id.len())];
         let session_name = format!("cc_{}", short_id);
+        // Kill any stale tmux session with this name first, then create
+        // a fresh one.  Never use -A (attach-or-create) — we always want
+        // a clean session so that closing in Command Center fully ends it.
         parts.push(format!(
-            "command -v tmux >/dev/null 2>&1 && tmux new-session -A -s {} || exec $SHELL -l",
-            session_name
+            "command -v tmux >/dev/null 2>&1 && {{ tmux kill-session -t {name} 2>/dev/null; tmux new-session -s {name}; }} || exec $SHELL -l",
+            name = session_name
         ));
     } else {
         parts.push("exec $SHELL -l".to_string());
@@ -318,10 +320,9 @@ fn build_local_command(config: &SessionConfig, session_id: &str) -> Result<Comma
         let session_name = format!("cc_{}", short_id);
         cmd.arg("-l");
         cmd.arg("-c");
-        // Graceful: fall back to plain shell if tmux isn't installed.
         cmd.arg(format!(
-            "command -v tmux >/dev/null 2>&1 && tmux new-session -A -s {} || exec $SHELL -l",
-            session_name
+            "command -v tmux >/dev/null 2>&1 && {{ tmux kill-session -t {name} 2>/dev/null; tmux new-session -s {name}; }} || exec $SHELL -l",
+            name = session_name
         ));
     } else {
         cmd.arg("-l");
@@ -1001,16 +1002,12 @@ fn close_session(
     session_id: String,
 ) -> Result<(), String> {
     if let Some(mut handle) = state.sessions.lock().remove(&session_id) {
-        let config = handle.info.config.clone();
-        let short_id = session_id[..8.min(session_id.len())].to_string();
-        let tmux_name = format!("cc_{}", short_id);
-
         // 1. Try graceful exit through the PTY (may fail if already dead).
         let _ = handle.writer.write_all(b"\x03");
         let _ = handle.writer.write_all(b"exit\r");
         let _ = handle.writer.flush();
 
-        // 2. Kill the local process tree.
+        // 2. Kill the entire local process tree (shell, ssh, tmux client).
         if let Some(pid) = handle.child.process_id() {
             #[cfg(unix)]
             unsafe {
@@ -1020,53 +1017,26 @@ fn close_session(
         }
         let _ = handle.child.kill();
 
-        // 3. Kill the tmux session out-of-band. Writing through the PTY
-        //    doesn't work if the connection is already dead — the remote
-        //    tmux server keeps running and new sessions reattach to it.
-        if config.wrap_in_tmux {
-            thread::spawn(move || {
-                let kind = config.kind.as_deref().unwrap_or("ssh");
-                if kind == "local" {
-                    // Local: just run tmux kill-session directly.
-                    let _ = std::process::Command::new("tmux")
-                        .args(["kill-session", "-t", &tmux_name])
-                        .output();
-                } else {
-                    // SSH: open a throwaway SSH connection to kill the
-                    // remote tmux session.
-                    let mut cmd = std::process::Command::new("ssh");
-                    cmd.args(["-o", "ConnectTimeout=5"]);
-                    cmd.args(["-o", "StrictHostKeyChecking=no"]);
-                    cmd.args(["-o", "BatchMode=yes"]);
-
-                    if let Some(ref alias) = config.ssh_alias.as_deref().filter(|s| !s.is_empty()) {
-                        cmd.arg(alias);
-                    } else if let (Some(host), Some(user)) = (
-                        config.host.as_deref().filter(|h| !h.is_empty()),
-                        config.user.as_deref().filter(|u| !u.is_empty()),
-                    ) {
-                        let port = config.port.unwrap_or(22);
-                        cmd.args(["-p", &port.to_string()]);
-                        if let Some(ref key) = config.identity_file.as_deref().filter(|k| !k.is_empty()) {
-                            cmd.args(["-i", &expand_tilde(key)]);
-                        }
-                        cmd.arg(format!("{}@{}", user, host));
-                    }
-
-                    cmd.arg(format!("tmux kill-session -t {} 2>/dev/null; true", tmux_name));
-                    let _ = cmd.output();
-                }
-
-                // Reap the child process.
-                let _ = handle.child.wait();
-                // master and writer drop here, closing the PTY fd
-            });
-        } else {
-            // No tmux — just reap in background.
-            thread::spawn(move || {
-                let _ = handle.child.wait();
-            });
+        // 3. For local tmux sessions, kill the tmux server-side session
+        //    directly. For SSH tmux sessions, the remote tmux session
+        //    will linger but won't be reused — each new session gets a
+        //    unique UUID-based tmux name, and the create command pre-
+        //    cleans any stale session with that name before starting.
+        if handle.info.config.wrap_in_tmux {
+            let kind = handle.info.config.kind.as_deref().unwrap_or("ssh");
+            if kind == "local" {
+                let short_id = session_id[..8.min(session_id.len())].to_string();
+                let tmux_name = format!("cc_{}", short_id);
+                let _ = std::process::Command::new("tmux")
+                    .args(["kill-session", "-t", &tmux_name])
+                    .output();
+            }
         }
+
+        // 4. Reap zombie in background.
+        thread::spawn(move || {
+            let _ = handle.child.wait();
+        });
     }
     // Also delete the transcript file
     if let Some(path) = transcript_path(&app, &session_id) {

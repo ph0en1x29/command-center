@@ -49,7 +49,7 @@ export function useTerminal(options: UseTerminalOptions = {}) {
     const term = new Terminal({
       cursorBlink: true,
       cursorStyle: "block",
-      fontSize: options.fontSize || 13,
+      fontSize: options.fontSize || 12,
       fontFamily: '"JetBrains Mono", "SF Mono", "Fira Code", monospace',
       fontWeight: "400",
       lineHeight: 1.0,
