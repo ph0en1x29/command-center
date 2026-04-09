@@ -57,7 +57,7 @@ export function useTerminal(options: UseTerminalOptions = {}) {
       cursorBlink: true,
       cursorStyle: "block",
       fontSize: options.fontSize || 12,
-      fontFamily: '"JetBrains Mono", "SF Mono", "Fira Code", monospace',
+      fontFamily: '"JetBrains Mono", Menlo, "SF Mono", monospace',
       fontWeight: "400",
       lineHeight: 1.0,
       letterSpacing: 0,
@@ -74,13 +74,12 @@ export function useTerminal(options: UseTerminalOptions = {}) {
     term.loadAddon(webLinksAddon);
     term.open(terminalRef.current);
 
-    // No WebGL addon — the canvas renderer is reliable across layout
-    // switches, tab changes, and off-screen rendering. WebGL contexts
-    // get lost/evicted in multi-tab scenarios within Tauri's WebView,
-    // causing blank terminals that no re-attachment hack can fix.
-
-    // Wait for fonts before fitting.
-    const fitAfterFonts = () => {
+    // Do NOT fit until the web font is loaded. Fitting with a fallback
+    // font produces wrong cell dimensions → wrong cols/rows → the PTY
+    // gets told the wrong size → text overflows or wraps incorrectly.
+    // The terminal stays at 80x24 until fonts are ready, then fits to
+    // the actual container size with correct metrics.
+    const doFit = () => {
       requestAnimationFrame(() => {
         try {
           term.options.fontFamily = term.options.fontFamily;
@@ -89,14 +88,7 @@ export function useTerminal(options: UseTerminalOptions = {}) {
       });
     };
 
-    if (document.fonts.status === "loaded") {
-      fitAfterFonts();
-    } else {
-      requestAnimationFrame(() => {
-        try { fitAddon.fit(); } catch {}
-      });
-      document.fonts.ready.then(fitAfterFonts);
-    }
+    document.fonts.ready.then(doFit);
 
     if (options.onData) {
       term.onData(options.onData);

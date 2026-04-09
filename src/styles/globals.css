@@ -63,10 +63,6 @@ html, body, #root {
   border-radius: 3px;
 }
 
-/* react-resizable-panels: let children handle their own scroll */
-[data-panel] {
-  overflow: visible !important;
-}
 
 /* Status dot animation */
 @keyframes pulse-dot {
