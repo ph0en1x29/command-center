@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - **Terminal text overlap**: xterm.js was measuring cell dimensions with a fallback monospace font before JetBrains Mono (loaded via Google Fonts `display=swap`) arrived, causing misaligned character rendering and overlapping text. The terminal now waits for `document.fonts.ready` before fitting, then forces a glyph atlas rebuild by re-assigning `fontFamily` — mirroring how Ghostty waits for stable font metrics before computing the grid.
 - **Terminal container overflow**: added `overflow-hidden` on the terminal body div and `height: 100%` on `.xterm` to prevent rendering bleed past container bounds during resize transitions.
 - **Startup command timing**: replaced the fixed 500ms delay with prompt detection (`$`, `%`, `>`, `#` suffix) so startup commands are typed only after the shell has finished loading `.zshrc`/`.bashrc`, avoiding double-echo when readline/zle hasn't initialised yet.
+- **Session close leaves orphan processes**: closing a session only removed it from the HashMap — the child process (shell, ssh, tmux) kept running. Now sends Ctrl-C + `exit`, kills the child process (SIGHUP on Unix propagates to the entire process group), and waits for reap in a background thread.
 
 ## [0.1.0] - 2026-04-09
 

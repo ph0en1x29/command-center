@@ -59,7 +59,7 @@ npx tsc --noEmit
 **lib.rs** -- the main module, approximately 1080 lines. Contains:
 
 - **Type definitions**: `SessionConfig` (all connection parameters + toggles), `SessionStatus` (enum with 9 variants: Connecting, Connected, Reconnecting, Disconnected, Thinking, Writing, RunningCommand, Error, Idle), `SessionInfo` (runtime session state including bytes, uptime, keep_awake, reconnect_count), `SessionOutput`, `StatusUpdate`
-- **SessionHandle** struct: holds `SessionInfo`, PTY writer (`Box<dyn Write + Send>`), and master PTY reference (`Box<dyn MasterPty + Send>`)
+- **SessionHandle** struct: holds `SessionInfo`, PTY writer (`Box<dyn Write + Send>`), master PTY reference (`Box<dyn MasterPty + Send>`), and child process (`Box<dyn Child + Send>`)
 - **AppState**: `Mutex<HashMap<String, SessionHandle>>` managing all active sessions; wrapped in `Arc` and shared across threads
 - **`build_ssh_command()`**: constructs a `CommandBuilder` for SSH with `-t`, `ServerAliveInterval`, `SSH_AUTH_SOCK` forwarding, ssh_alias support, and a remote command that exports `TERM=xterm-256color COLORTERM=truecolor`, optionally `cd`s to a project dir, and optionally wraps in tmux (with graceful fallback)
 - **`build_local_command()`**: constructs a login shell (`$SHELL -l`) with explicit env vars (HOME, PATH, USER, LANG, TERM, COLORTERM), optional `cwd`, optional tmux wrapping

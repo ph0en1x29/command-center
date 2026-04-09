@@ -2,7 +2,7 @@ mod profiles;
 
 use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
@@ -120,6 +120,7 @@ struct SessionHandle {
     info: SessionInfo,
     writer: Box<dyn Write + Send>,
     _master: Box<dyn MasterPty + Send>,
+    child: Box<dyn Child + Send>,
 }
 
 // ── App State ──────────────────────────────────────────────────────────
@@ -306,11 +307,12 @@ fn build_local_command(config: &SessionConfig) -> Result<CommandBuilder, String>
     Ok(cmd)
 }
 
-// Spawns a PTY for the given config and returns (master, writer, reader).
+// Spawns a PTY for the given config and returns (master, writer, reader, child).
 type PtyParts = (
     Box<dyn MasterPty + Send>,
     Box<dyn Write + Send>,
     Box<dyn Read + Send>,
+    Box<dyn Child + Send>,
 );
 
 fn spawn_pty(config: &SessionConfig) -> Result<PtyParts, String> {
@@ -330,7 +332,7 @@ fn spawn_pty(config: &SessionConfig) -> Result<PtyParts, String> {
         _ => build_ssh_command(config)?,
     };
 
-    let _child = pair
+    let child = pair
         .slave
         .spawn_command(cmd)
         .map_err(|e| format!("Failed to spawn process: {}", e))?;
@@ -344,7 +346,7 @@ fn spawn_pty(config: &SessionConfig) -> Result<PtyParts, String> {
         .try_clone_reader()
         .map_err(|e| format!("Failed to get reader: {}", e))?;
 
-    Ok((pair.master, writer, reader))
+    Ok((pair.master, writer, reader, child))
 }
 
 // ── Scrollback transcripts ────────────────────────────────────────────
@@ -660,11 +662,12 @@ fn run_session_loop(
                 }
                 thread::sleep(backoff);
                 match spawn_pty(&config_for_reconnect) {
-                    Ok((master, writer, new_reader)) => {
+                    Ok((master, writer, new_reader, new_child)) => {
                         let mut sessions = state.sessions.lock();
                         if let Some(handle) = sessions.get_mut(&session_id) {
                             handle.writer = writer;
                             handle._master = master;
+                            handle.child = new_child;
                             handle.info.reconnect_count += 1;
                             handle.info.last_activity = Utc::now();
                         }
@@ -825,7 +828,7 @@ fn create_session(
     config: SessionConfig,
 ) -> Result<SessionInfo, String> {
     let id = Uuid::new_v4().to_string();
-    let (master, writer, reader) = spawn_pty(&config)?;
+    let (master, writer, reader, child) = spawn_pty(&config)?;
 
     let kind = config.kind.as_deref().unwrap_or("ssh");
     let now = Utc::now();
@@ -853,6 +856,7 @@ fn create_session(
         info: info.clone(),
         writer,
         _master: master,
+        child,
     };
 
     state.sessions.lock().insert(id.clone(), handle);
@@ -936,7 +940,25 @@ fn close_session(
     state: State<'_, Arc<AppState>>,
     session_id: String,
 ) -> Result<(), String> {
-    state.sessions.lock().remove(&session_id);
+    if let Some(mut handle) = state.sessions.lock().remove(&session_id) {
+        // 1. Ask the shell / SSH / tmux to exit gracefully.
+        //    Send Ctrl-C first (abort any running command), then "exit\r".
+        let _ = handle.writer.write_all(b"\x03");
+        let _ = handle.writer.write_all(b"exit\r");
+        let _ = handle.writer.flush();
+
+        // 2. Kill the child process tree. On Unix this sends SIGHUP to the
+        //    process group leader, which propagates to all children (ssh,
+        //    remote shell, tmux client, etc.).
+        let _ = handle.child.kill();
+
+        // 3. Wait briefly so the OS can reap the zombie. Spawn a thread so
+        //    we don't block the Tauri command responder.
+        thread::spawn(move || {
+            let _ = handle.child.wait();
+            // master and writer drop here, closing the PTY fd
+        });
+    }
     // Also delete the transcript file
     if let Some(path) = transcript_path(&app, &session_id) {
         let _ = std::fs::remove_file(path);
