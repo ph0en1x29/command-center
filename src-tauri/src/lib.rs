@@ -154,11 +154,6 @@ fn expand_tilde(path: &str) -> String {
 }
 
 /// Slugify a session name for safe use as a tmux session name.
-fn slugify(s: &str) -> String {
-    s.chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '_' })
-        .collect()
-}
 
 /// Strip ANSI escape sequences (CSI, OSC, simple escapes) so we can
 /// inspect the visible text of PTY output.
@@ -240,7 +235,7 @@ fn detect_claude_status(line: &str) -> Option<(SessionStatus, Option<String>)> {
 
 // ── Command building ───────────────────────────────────────────────────
 
-fn build_ssh_command(config: &SessionConfig) -> Result<CommandBuilder, String> {
+fn build_ssh_command(config: &SessionConfig, session_id: &str) -> Result<CommandBuilder, String> {
     let mut cmd = CommandBuilder::new("ssh");
     cmd.arg("-o");
     cmd.arg("ServerAliveInterval=30");
@@ -296,7 +291,10 @@ fn build_ssh_command(config: &SessionConfig) -> Result<CommandBuilder, String> {
         parts.push(format!("cd {}", dir));
     }
     if config.wrap_in_tmux {
-        let session_name = format!("cc_{}", slugify(&config.name));
+        // Use the first 8 chars of the session UUID for a unique tmux name.
+        // This avoids collisions when two sessions share the same display name.
+        let short_id = &session_id[..8.min(session_id.len())];
+        let session_name = format!("cc_{}", short_id);
         parts.push(format!(
             "command -v tmux >/dev/null 2>&1 && tmux new-session -A -s {} || exec $SHELL -l",
             session_name
@@ -309,14 +307,15 @@ fn build_ssh_command(config: &SessionConfig) -> Result<CommandBuilder, String> {
     Ok(cmd)
 }
 
-fn build_local_command(config: &SessionConfig) -> Result<CommandBuilder, String> {
+fn build_local_command(config: &SessionConfig, session_id: &str) -> Result<CommandBuilder, String> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
     let mut cmd = CommandBuilder::new(&shell);
 
     // Only tmux wrapping is done via -c; startup_command is typed into the
     // PTY after the shell loads (so aliases/functions work).
     if config.wrap_in_tmux {
-        let session_name = format!("cc_{}", slugify(&config.name));
+        let short_id = &session_id[..8.min(session_id.len())];
+        let session_name = format!("cc_{}", short_id);
         cmd.arg("-l");
         cmd.arg("-c");
         // Graceful: fall back to plain shell if tmux isn't installed.
@@ -363,7 +362,7 @@ type PtyParts = (
     Box<dyn Child + Send>,
 );
 
-fn spawn_pty(config: &SessionConfig) -> Result<PtyParts, String> {
+fn spawn_pty(config: &SessionConfig, session_id: &str) -> Result<PtyParts, String> {
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {
@@ -376,8 +375,8 @@ fn spawn_pty(config: &SessionConfig) -> Result<PtyParts, String> {
 
     let kind = config.kind.as_deref().unwrap_or("ssh");
     let cmd = match kind {
-        "local" => build_local_command(config)?,
-        _ => build_ssh_command(config)?,
+        "local" => build_local_command(config, session_id)?,
+        _ => build_ssh_command(config, session_id)?,
     };
 
     let child = pair
@@ -722,7 +721,7 @@ fn run_session_loop(
                     return;
                 }
                 thread::sleep(backoff);
-                match spawn_pty(&config_for_reconnect) {
+                match spawn_pty(&config_for_reconnect, &session_id) {
                     Ok((master, writer, new_reader, new_child)) => {
                         let mut sessions = state.sessions.lock();
                         if let Some(handle) = sessions.get_mut(&session_id) {
@@ -889,7 +888,7 @@ fn create_session(
     config: SessionConfig,
 ) -> Result<SessionInfo, String> {
     let id = Uuid::new_v4().to_string();
-    let (master, writer, reader, child) = spawn_pty(&config)?;
+    let (master, writer, reader, child) = spawn_pty(&config, &id)?;
 
     let kind = config.kind.as_deref().unwrap_or("ssh");
     let now = Utc::now();
@@ -1007,8 +1006,8 @@ fn close_session(
         // If tmux is wrapping, kill the remote tmux session so it
         // doesn't linger for the next connection to re-attach to.
         if handle.info.config.wrap_in_tmux {
-            let slug = slugify(&handle.info.config.name);
-            let kill_tmux = format!("tmux kill-session -t cc_{} 2>/dev/null\r", slug);
+            let short_id = &session_id[..8.min(session_id.len())];
+            let kill_tmux = format!("tmux kill-session -t cc_{} 2>/dev/null\r", short_id);
             let _ = handle.writer.write_all(kill_tmux.as_bytes());
         }
         let _ = handle.writer.write_all(b"exit\r");

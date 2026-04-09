@@ -43,14 +43,12 @@ html, body, #root {
   -webkit-app-region: drag;
 }
 
-/* Terminal overrides — padding lives on the wrapper div, not on .xterm,
-   so the WebGL canvas and FitAddon both measure from a clean content box. */
+/* Terminal overrides — padding MUST be on .xterm (not the parent) because
+   FitAddon reads it from the terminal element and subtracts it from the
+   parent's dimensions to calculate cols/rows.  */
 .xterm {
+  padding: 4px 8px;
   height: 100% !important;
-  width: 100% !important;
-}
-.xterm-viewport {
-  overflow-y: auto !important;
 }
 .xterm-viewport::-webkit-scrollbar {
   width: 6px;
@@ -58,9 +56,6 @@ html, body, #root {
 .xterm-viewport::-webkit-scrollbar-thumb {
   background: #ffffff1a;
   border-radius: 3px;
-}
-.xterm-screen {
-  width: 100% !important;
 }
 
 /* Status dot animation */

@@ -52,7 +52,7 @@ export function useTerminal(options: UseTerminalOptions = {}) {
       fontSize: options.fontSize || 13,
       fontFamily: '"JetBrains Mono", "SF Mono", "Fira Code", monospace',
       fontWeight: "400",
-      lineHeight: 1.35,
+      lineHeight: 1.15,
       letterSpacing: 0,
       theme: GHOSTTY_THEME,
       allowProposedApi: true,
@@ -126,11 +126,6 @@ export function useTerminal(options: UseTerminalOptions = {}) {
 
   const fit = useCallback(() => {
     try {
-      // Re-assert font metrics before fitting — catches cases where the
-      // web font loaded between the last fit and now (layout switch, etc.)
-      if (termRef.current) {
-        termRef.current.options.fontFamily = termRef.current.options.fontFamily;
-      }
       fitRef.current?.fit();
     } catch {}
   }, []);

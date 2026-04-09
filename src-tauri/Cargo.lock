@@ -470,9 +470,10 @@ dependencies = [
 
 [[package]]
 name = "command-center"
-version = "0.1.0"
+version = "26.4.9"
 dependencies = [
  "chrono",
+ "libc",
  "parking_lot",
  "portable-pty",
  "serde",
