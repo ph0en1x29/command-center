@@ -145,24 +145,34 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
     );
   }
 
-  // ── Focus: render ALL sessions, hide inactive with display:none.
-  //    Without WebGL, the canvas renderer survives display:none — it just
-  //    pauses rendering. On activate, TerminalPanel calls fit()+refresh()
-  //    to resume. Panels stay mounted so xterm instances, scrollback, and
-  //    output handlers are never destroyed. ──────────────────────────────
+  // ── Focus: all sessions stacked with absolute positioning + opacity.
+  //    Every panel is fully rendered at full size (not display:none, not
+  //    visibility:hidden, not transformed off-screen — all of those cause
+  //    xterm's _isPaused flag to stay true and the canvas never repaints).
+  //    With opacity:0, the element has real dimensions, IntersectionObserver
+  //    sees it as visible, and the canvas actively renders. Switching tabs
+  //    just flips opacity — the content is already painted. ─────────────
   if (layoutMode === "focus" || visibleSessions.length === 1) {
     const allSessions = Array.from(sessions.values());
     const activeId = visibleSessions[0]?.id;
     return (
-      <div className="flex-1 p-1.5 bg-surface-0 min-h-0 flex flex-col">
-        {allSessions.map((s) => (
-          <div
-            key={s.id}
-            style={{ display: s.id === activeId ? "flex" : "none", flex: 1, minHeight: 0 }}
-          >
-            {renderPanel(s, false)}
-          </div>
-        ))}
+      <div className="flex-1 p-1.5 bg-surface-0 min-h-0 relative">
+        {allSessions.map((s) => {
+          const active = s.id === activeId;
+          return (
+            <div
+              key={s.id}
+              className="absolute inset-0"
+              style={{
+                opacity: active ? 1 : 0,
+                pointerEvents: active ? "auto" : "none",
+                zIndex: active ? 1 : 0,
+              }}
+            >
+              {renderPanel(s, false)}
+            </div>
+          );
+        })}
       </div>
     );
   }

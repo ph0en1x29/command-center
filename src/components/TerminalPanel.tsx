@@ -148,17 +148,11 @@ export function TerminalPanel({
   useEffect(() => {
     if (!containerRef.current) return;
     const observer = new ResizeObserver(() => {
-      requestAnimationFrame(() => {
-        fit();
-        // After fit, force the canvas to repaint all rows. This is
-        // critical when the container transitions from display:none to
-        // visible — the buffer has data but the canvas hasn't painted.
-        try { terminal.current?.refresh(0, terminal.current.rows - 1); } catch {}
-      });
+      requestAnimationFrame(() => fit());
     });
     observer.observe(containerRef.current);
     return () => observer.disconnect();
-  }, [fit, terminal]);
+  }, [fit]);
 
   // Force-propagate the actual terminal size to the PTY shortly after mount.
   // The PTY starts at 80x24 but the xterm panel may be larger. The initial
@@ -180,25 +174,11 @@ export function TerminalPanel({
 
   useEffect(() => {
     if (isActive) {
-      // After display changes from none → flex, we need to wait until
-      // the element actually has dimensions before fitting and repainting.
-      // ResizeObserver and setTimeout are unreliable for this in WebKit.
-      // Instead, poll with rAF until offsetHeight > 0.
-      let cancelled = false;
-      const tryActivate = () => {
-        if (cancelled) return;
-        const el = containerRef.current;
-        if (el && el.offsetHeight > 0) {
-          fit();
-          try { terminal.current?.refresh(0, terminal.current.rows - 1); } catch {}
-          focus();
-          markViewed(session.id);
-        } else {
-          requestAnimationFrame(tryActivate);
-        }
-      };
-      requestAnimationFrame(tryActivate);
-      return () => { cancelled = true; };
+      setTimeout(() => {
+        fit();
+        focus();
+        markViewed(session.id);
+      }, 50);
     }
   }, [isActive, focus, session.id, markViewed]);
 
