@@ -281,22 +281,18 @@ fn build_ssh_command(config: &SessionConfig, session_id: &str) -> Result<Command
         cmd.arg(format!("{}@{}", user, host));
     }
 
-    // Always pass a remote command that sets TERM + COLORTERM so Claude Code
-    // and other TUI apps get full color support. sshd's AcceptEnv typically
-    // only allows LANG/LC_*, so we can't rely on env forwarding.
+    // Set TERM/COLORTERM so TUI apps get full color, and CC_SESSION so the
+    // user's shell config can skip tmux auto-attach (which would cause every
+    // Command Center session to land in the same tmux session).
     let mut parts: Vec<String> = vec![
-        "export TERM=xterm-256color COLORTERM=truecolor".to_string(),
+        "export TERM=xterm-256color COLORTERM=truecolor CC_SESSION=1".to_string(),
     ];
     if let Some(dir) = config.project_dir.as_deref().filter(|s| !s.is_empty()) {
         parts.push(format!("cd {}", dir));
     }
     if config.wrap_in_tmux {
-        // Use the first 8 chars of the session UUID for a unique tmux name.
         let short_id = &session_id[..8.min(session_id.len())];
         let session_name = format!("cc_{}", short_id);
-        // Kill any stale tmux session with this name first, then create
-        // a fresh one.  Never use -A (attach-or-create) — we always want
-        // a clean session so that closing in Command Center fully ends it.
         parts.push(format!(
             "command -v tmux >/dev/null 2>&1 && {{ tmux kill-session -t {name} 2>/dev/null; tmux new-session -s {name}; }} || exec $SHELL -l",
             name = session_name
@@ -351,6 +347,9 @@ fn build_local_command(config: &SessionConfig, session_id: &str) -> Result<Comma
     }
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+    // Let shell configs detect they're inside Command Center and skip
+    // tmux auto-attach (which causes multiple sessions to collide).
+    cmd.env("CC_SESSION", "1");
 
     Ok(cmd)
 }
@@ -1017,26 +1016,50 @@ fn close_session(
         }
         let _ = handle.child.kill();
 
-        // 3. For local tmux sessions, kill the tmux server-side session
-        //    directly. For SSH tmux sessions, the remote tmux session
-        //    will linger but won't be reused — each new session gets a
-        //    unique UUID-based tmux name, and the create command pre-
-        //    cleans any stale session with that name before starting.
+        // 3. Kill the tmux session (server-side).
         if handle.info.config.wrap_in_tmux {
-            let kind = handle.info.config.kind.as_deref().unwrap_or("ssh");
-            if kind == "local" {
-                let short_id = session_id[..8.min(session_id.len())].to_string();
-                let tmux_name = format!("cc_{}", short_id);
-                let _ = std::process::Command::new("tmux")
-                    .args(["kill-session", "-t", &tmux_name])
-                    .output();
-            }
-        }
+            let config = handle.info.config.clone();
+            let short_id = session_id[..8.min(session_id.len())].to_string();
+            let tmux_name = format!("cc_{}", short_id);
+            let kind = config.kind.as_deref().unwrap_or("ssh").to_string();
 
-        // 4. Reap zombie in background.
-        thread::spawn(move || {
-            let _ = handle.child.wait();
-        });
+            thread::spawn(move || {
+                if kind == "local" {
+                    let _ = std::process::Command::new("tmux")
+                        .args(["kill-session", "-t", &tmux_name])
+                        .output();
+                } else {
+                    // SSH: open a throwaway connection to kill the remote
+                    // tmux session. Forward SSH_AUTH_SOCK so key agent works.
+                    let mut cmd = std::process::Command::new("ssh");
+                    cmd.args(["-o", "ConnectTimeout=5", "-o", "BatchMode=yes"]);
+                    if let Ok(sock) = std::env::var("SSH_AUTH_SOCK") {
+                        cmd.env("SSH_AUTH_SOCK", sock);
+                    }
+                    if let Some(alias) = config.ssh_alias.as_deref().filter(|s| !s.is_empty()) {
+                        cmd.arg(alias);
+                    } else if let (Some(host), Some(user)) = (
+                        config.host.as_deref().filter(|h| !h.is_empty()),
+                        config.user.as_deref().filter(|u| !u.is_empty()),
+                    ) {
+                        cmd.args(["-p", &config.port.unwrap_or(22).to_string()]);
+                        if let Some(key) = config.identity_file.as_deref().filter(|k| !k.is_empty()) {
+                            cmd.args(["-i", &expand_tilde(key)]);
+                        }
+                        cmd.arg(format!("{}@{}", user, host));
+                    }
+                    cmd.arg(format!("tmux kill-session -t {} 2>/dev/null; true", tmux_name));
+                    let _ = cmd.output();
+                }
+                // Reap the child.
+                let _ = handle.child.wait();
+            });
+        } else {
+            // 4. No tmux — just reap in background.
+            thread::spawn(move || {
+                let _ = handle.child.wait();
+            });
+        }
     }
     // Also delete the transcript file
     if let Some(path) = transcript_path(&app, &session_id) {
