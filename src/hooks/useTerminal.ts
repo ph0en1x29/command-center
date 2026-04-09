@@ -9,7 +9,6 @@ interface UseTerminalOptions {
   fontSize?: number;
 }
 
-// Ghostty default theme
 const GHOSTTY_THEME = {
   background: "#282c34",
   foreground: "#ffffff",
@@ -40,21 +39,40 @@ export function useTerminal(options: UseTerminalOptions = {}) {
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
 
-  // Fit the terminal to its container, then subtract 1 column to
-  // prevent subpixel-rounding overflow. FitAddon uses parseInt() on
-  // the parent's computed width (truncating fractional CSS pixels)
-  // and Math.floor(width / cellWidth), but the canvas renderer may
-  // round cell positions differently, causing the rightmost column
-  // to overflow by 1 character. Subtracting 1 col is the same
-  // approach VS Code's terminal uses for this exact issue.
-  const safeFit = useCallback(() => {
+  // Custom fit that bypasses FitAddon's resize entirely.
+  // FitAddon calls terminal.resize(N) then we'd call resize(N-1),
+  // producing TWO SIGWINCH signals where the first (wrong) one can
+  // win the race. Instead, we calculate dimensions ourselves using
+  // getBoundingClientRect (precise floats, no parseInt truncation)
+  // and issue a single resize(N-1) call.
+  const fit = useCallback(() => {
     try {
-      const fit = fitRef.current;
       const term = termRef.current;
-      if (!fit || !term) return;
-      fit.fit();
-      if (term.cols > 2) {
-        term.resize(term.cols - 1, term.rows);
+      const container = terminalRef.current;
+      if (!term || !container) return;
+
+      const core = (term as any)._core;
+      const dims = core._renderService?.dimensions;
+      if (!dims || dims.css.cell.width === 0 || dims.css.cell.height === 0) return;
+
+      const scrollbarWidth = core.viewport?.scrollBarWidth ?? 0;
+
+      // getBoundingClientRect gives precise floating-point px — no
+      // parseInt truncation like FitAddon uses.
+      const rect = container.getBoundingClientRect();
+      const availableWidth = rect.width - scrollbarWidth;
+      const availableHeight = rect.height;
+
+      // Subtract 1 col to prevent subpixel rounding overflow at the
+      // right edge. This matches how real terminal emulators handle
+      // fractional remainders — they leave a small gap rather than
+      // risk characters overflowing.
+      const cols = Math.max(2, Math.floor(availableWidth / dims.css.cell.width) - 1);
+      const rows = Math.max(1, Math.floor(availableHeight / dims.css.cell.height));
+
+      if (cols !== term.cols || rows !== term.rows) {
+        core._renderService.clear();
+        term.resize(cols, rows);
       }
     } catch {}
   }, []);
@@ -82,6 +100,9 @@ export function useTerminal(options: UseTerminalOptions = {}) {
       macOptionIsMeta: true,
     });
 
+    // FitAddon is still loaded so xterm internals (viewport, render
+    // service) are initialized, but we never call fitAddon.fit() —
+    // we use our own fit() that issues a single correct resize.
     const fitAddon = new FitAddon();
     const webLinksAddon = new WebLinksAddon();
 
@@ -92,13 +113,11 @@ export function useTerminal(options: UseTerminalOptions = {}) {
     termRef.current = term;
     fitRef.current = fitAddon;
 
-    // Only fit ONCE, after fonts are loaded. No early fit with wrong
-    // metrics, no delayed retries. The terminal stays at 80x24 until
-    // this fires, then gets the correct size in one shot.
+    // Fit once after fonts are loaded.
     document.fonts.ready.then(() => {
       requestAnimationFrame(() => {
         term.options.fontFamily = term.options.fontFamily;
-        safeFit();
+        fit();
       });
     });
 
@@ -111,7 +130,7 @@ export function useTerminal(options: UseTerminalOptions = {}) {
         options.onResize?.(cols, rows);
       });
     }
-  }, [options.fontSize, safeFit]);
+  }, [options.fontSize, fit]);
 
   const write = useCallback((data: string) => {
     termRef.current?.write(data);
@@ -139,7 +158,7 @@ export function useTerminal(options: UseTerminalOptions = {}) {
     terminalRef,
     initTerminal,
     write,
-    fit: safeFit,
+    fit,
     focus,
     dispose,
     terminal: termRef,
