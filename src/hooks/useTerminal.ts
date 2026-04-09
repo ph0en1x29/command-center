@@ -53,7 +53,7 @@ export function useTerminal(options: UseTerminalOptions = {}) {
       const dims = addon.proposeDimensions();
       if (!dims) return;
 
-      const cols = Math.max(2, dims.cols - 2);
+      const cols = Math.max(2, dims.cols - 3);
       const rows = Math.max(1, dims.rows);
 
       if (cols !== term.cols || rows !== term.rows) {
