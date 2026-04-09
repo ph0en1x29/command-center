@@ -145,27 +145,12 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
     );
   }
 
-  // ── Focus: ALL sessions rendered, only active visible. Parent is a
-  //    plain block (NOT flex-col — adding flex-col changes width calc
-  //    and breaks text columns). Active wrapper: height:100%. Inactive:
-  //    height:0 + overflow:hidden (collapsed but mounted).
+  // ── Focus: single panel, no wrappers. This is the only layout that
+  //    renders text correctly — any wrapper div breaks col calculation.
   if (layoutMode === "focus" || visibleSessions.length === 1) {
-    const allSessions = Array.from(sessions.values());
-    const activeId = visibleSessions[0]?.id;
     return (
       <div className="flex-1 p-1.5 bg-surface-0 min-h-0">
-        {allSessions.map((s) => (
-          <div
-            key={s.id}
-            style={
-              s.id === activeId
-                ? { height: "100%" }
-                : { height: 0, overflow: "hidden" }
-            }
-          >
-            {renderPanel(s, false)}
-          </div>
-        ))}
+        {renderPanel(visibleSessions[0], false)}
       </div>
     );
   }

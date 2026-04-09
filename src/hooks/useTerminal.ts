@@ -41,23 +41,24 @@ export function useTerminal(options: UseTerminalOptions = {}) {
 
   const fit = useCallback(() => {
     try {
-      const addon = fitRef.current;
       const term = termRef.current;
-      if (!addon || !term) return;
+      const container = terminalRef.current;
+      if (!term || !container) return;
 
-      // Use proposeDimensions() to CALCULATE without resizing.
-      // Then do ONE resize with corrected cols. This prevents
-      // the double-SIGWINCH race: fitAddon.fit() would resize to N,
-      // the remote draws at N cols, then we resize to N-2 but the
-      // N-col output already arrived and wraps in the N-2 grid.
-      const dims = addon.proposeDimensions();
-      if (!dims) return;
+      const core = (term as any)._core;
+      const dims = core._renderService?.dimensions;
+      if (!dims || dims.css.cell.width === 0 || dims.css.cell.height === 0) return;
 
-      const cols = Math.max(2, dims.cols - 3);
-      const rows = Math.max(1, dims.rows);
+      const scrollbarWidth = core.viewport?.scrollBarWidth ?? 0;
+      const rect = container.getBoundingClientRect();
+      const availableWidth = rect.width - scrollbarWidth;
+      const availableHeight = rect.height;
+
+      const cols = Math.max(2, Math.floor(availableWidth / dims.css.cell.width) - 1);
+      const rows = Math.max(1, Math.floor(availableHeight / dims.css.cell.height));
 
       if (cols !== term.cols || rows !== term.rows) {
-        (term as any)._core._renderService.clear();
+        core._renderService.clear();
         term.resize(cols, rows);
       }
     } catch {}
