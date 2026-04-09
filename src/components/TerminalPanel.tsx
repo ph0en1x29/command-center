@@ -180,16 +180,25 @@ export function TerminalPanel({
 
   useEffect(() => {
     if (isActive) {
-      // After display changes from none → flex, the canvas needs to be
-      // resized and re-rendered. fit() recalculates dimensions, refresh()
-      // forces the canvas renderer to repaint all rows.
-      const t = setTimeout(() => {
-        fit();
-        try { terminal.current?.refresh(0, terminal.current.rows - 1); } catch {}
-        focus();
-        markViewed(session.id);
-      }, 50);
-      return () => clearTimeout(t);
+      // After display changes from none → flex, we need to wait until
+      // the element actually has dimensions before fitting and repainting.
+      // ResizeObserver and setTimeout are unreliable for this in WebKit.
+      // Instead, poll with rAF until offsetHeight > 0.
+      let cancelled = false;
+      const tryActivate = () => {
+        if (cancelled) return;
+        const el = containerRef.current;
+        if (el && el.offsetHeight > 0) {
+          fit();
+          try { terminal.current?.refresh(0, terminal.current.rows - 1); } catch {}
+          focus();
+          markViewed(session.id);
+        } else {
+          requestAnimationFrame(tryActivate);
+        }
+      };
+      requestAnimationFrame(tryActivate);
+      return () => { cancelled = true; };
     }
   }, [isActive, focus, session.id, markViewed]);
 
