@@ -43,11 +43,11 @@ html, body, #root {
   -webkit-app-region: drag;
 }
 
-/* Terminal overrides — padding MUST be on .xterm (not the parent) because
-   FitAddon reads it from the terminal element and subtracts it from the
-   parent's dimensions to calculate cols/rows.  */
+/* Terminal overrides — zero padding on .xterm so the grid starts at
+   pixel (0,0) like Ghostty.  Any CSS padding would offset the canvas
+   origin, breaking cursor-addressed TUI rendering (the cursor position
+   and the visual position would be out of sync). */
 .xterm {
-  padding: 4px 8px;
   height: 100% !important;
 }
 .xterm-viewport::-webkit-scrollbar {

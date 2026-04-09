@@ -121,7 +121,7 @@ export function TerminalPanel({
   }, [session.id, writeToSession]);
 
   const { terminalRef, initTerminal, write, fit, focus } = useTerminal({
-    fontSize: compact ? 11 : 13,
+    fontSize: compact ? 10 : 13,
     onData,
     onResize: (cols, rows) => {
       resizeSession(session.id, cols, rows);

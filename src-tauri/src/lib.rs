@@ -1001,38 +1001,72 @@ fn close_session(
     session_id: String,
 ) -> Result<(), String> {
     if let Some(mut handle) = state.sessions.lock().remove(&session_id) {
-        // 1. Abort any running command, then ask every layer to exit.
+        let config = handle.info.config.clone();
+        let short_id = session_id[..8.min(session_id.len())].to_string();
+        let tmux_name = format!("cc_{}", short_id);
+
+        // 1. Try graceful exit through the PTY (may fail if already dead).
         let _ = handle.writer.write_all(b"\x03");
-        // If tmux is wrapping, kill the remote tmux session so it
-        // doesn't linger for the next connection to re-attach to.
-        if handle.info.config.wrap_in_tmux {
-            let short_id = &session_id[..8.min(session_id.len())];
-            let kill_tmux = format!("tmux kill-session -t cc_{} 2>/dev/null\r", short_id);
-            let _ = handle.writer.write_all(kill_tmux.as_bytes());
-        }
         let _ = handle.writer.write_all(b"exit\r");
         let _ = handle.writer.flush();
 
-        // 2. Kill the entire process group so all children (ssh, shell,
-        //    tmux client, etc.) are terminated.  On Unix portable-pty's
-        //    kill() sends SIGHUP; we also send SIGKILL to the process
-        //    group via libc to be thorough.
+        // 2. Kill the local process tree.
         if let Some(pid) = handle.child.process_id() {
             #[cfg(unix)]
             unsafe {
-                // Kill the process group (negative pid).
                 libc::kill(-(pid as i32), libc::SIGHUP);
-                // Give processes a moment, then force-kill stragglers.
                 libc::kill(-(pid as i32), libc::SIGTERM);
             }
         }
         let _ = handle.child.kill();
 
-        // 3. Reap the zombie in a background thread.
-        thread::spawn(move || {
-            let _ = handle.child.wait();
-            // master and writer drop here, closing the PTY fd
-        });
+        // 3. Kill the tmux session out-of-band. Writing through the PTY
+        //    doesn't work if the connection is already dead — the remote
+        //    tmux server keeps running and new sessions reattach to it.
+        if config.wrap_in_tmux {
+            thread::spawn(move || {
+                let kind = config.kind.as_deref().unwrap_or("ssh");
+                if kind == "local" {
+                    // Local: just run tmux kill-session directly.
+                    let _ = std::process::Command::new("tmux")
+                        .args(["kill-session", "-t", &tmux_name])
+                        .output();
+                } else {
+                    // SSH: open a throwaway SSH connection to kill the
+                    // remote tmux session.
+                    let mut cmd = std::process::Command::new("ssh");
+                    cmd.args(["-o", "ConnectTimeout=5"]);
+                    cmd.args(["-o", "StrictHostKeyChecking=no"]);
+                    cmd.args(["-o", "BatchMode=yes"]);
+
+                    if let Some(ref alias) = config.ssh_alias.as_deref().filter(|s| !s.is_empty()) {
+                        cmd.arg(alias);
+                    } else if let (Some(host), Some(user)) = (
+                        config.host.as_deref().filter(|h| !h.is_empty()),
+                        config.user.as_deref().filter(|u| !u.is_empty()),
+                    ) {
+                        let port = config.port.unwrap_or(22);
+                        cmd.args(["-p", &port.to_string()]);
+                        if let Some(ref key) = config.identity_file.as_deref().filter(|k| !k.is_empty()) {
+                            cmd.args(["-i", &expand_tilde(key)]);
+                        }
+                        cmd.arg(format!("{}@{}", user, host));
+                    }
+
+                    cmd.arg(format!("tmux kill-session -t {} 2>/dev/null; true", tmux_name));
+                    let _ = cmd.output();
+                }
+
+                // Reap the child process.
+                let _ = handle.child.wait();
+                // master and writer drop here, closing the PTY fd
+            });
+        } else {
+            // No tmux — just reap in background.
+            thread::spawn(move || {
+                let _ = handle.child.wait();
+            });
+        }
     }
     // Also delete the transcript file
     if let Some(path) = transcript_path(&app, &session_id) {
