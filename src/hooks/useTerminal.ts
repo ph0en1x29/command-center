@@ -9,7 +9,7 @@ interface UseTerminalOptions {
   fontSize?: number;
 }
 
-// Ghostty default theme — pulled from ghostty-org/ghostty src/terminal/color.zig
+// Ghostty default theme
 const GHOSTTY_THEME = {
   background: "#282c34",
   foreground: "#ffffff",
@@ -17,7 +17,6 @@ const GHOSTTY_THEME = {
   cursorAccent: "#282c34",
   selectionBackground: "#3e4451",
   selectionForeground: "#ffffff",
-  // ANSI 0-7
   black: "#1d1f21",
   red: "#cc6666",
   green: "#b5bd68",
@@ -26,7 +25,6 @@ const GHOSTTY_THEME = {
   magenta: "#b294bb",
   cyan: "#8abeb7",
   white: "#c5c8c6",
-  // ANSI 8-15 (bright)
   brightBlack: "#666666",
   brightRed: "#d54e53",
   brightGreen: "#b9ca4a",
@@ -42,11 +40,28 @@ export function useTerminal(options: UseTerminalOptions = {}) {
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
 
+  // Fit the terminal to its container, then subtract 1 column to
+  // prevent subpixel-rounding overflow. FitAddon uses parseInt() on
+  // the parent's computed width (truncating fractional CSS pixels)
+  // and Math.floor(width / cellWidth), but the canvas renderer may
+  // round cell positions differently, causing the rightmost column
+  // to overflow by 1 character. Subtracting 1 col is the same
+  // approach VS Code's terminal uses for this exact issue.
+  const safeFit = useCallback(() => {
+    try {
+      const fit = fitRef.current;
+      const term = termRef.current;
+      if (!fit || !term) return;
+      fit.fit();
+      if (term.cols > 2) {
+        term.resize(term.cols - 1, term.rows);
+      }
+    } catch {}
+  }, []);
+
   const initTerminal = useCallback(() => {
     if (!terminalRef.current) return;
 
-    // If a previous terminal exists (e.g. layout switch caused remount),
-    // dispose it first so we get a fresh canvas.
     if (termRef.current) {
       try { termRef.current.dispose(); } catch {}
       termRef.current = null;
@@ -74,21 +89,18 @@ export function useTerminal(options: UseTerminalOptions = {}) {
     term.loadAddon(webLinksAddon);
     term.open(terminalRef.current);
 
-    // Do NOT fit until the web font is loaded. Fitting with a fallback
-    // font produces wrong cell dimensions → wrong cols/rows → the PTY
-    // gets told the wrong size → text overflows or wraps incorrectly.
-    // The terminal stays at 80x24 until fonts are ready, then fits to
-    // the actual container size with correct metrics.
-    const doFit = () => {
-      requestAnimationFrame(() => {
-        try {
-          term.options.fontFamily = term.options.fontFamily;
-          fitAddon.fit();
-        } catch {}
-      });
-    };
+    termRef.current = term;
+    fitRef.current = fitAddon;
 
-    document.fonts.ready.then(doFit);
+    // Only fit ONCE, after fonts are loaded. No early fit with wrong
+    // metrics, no delayed retries. The terminal stays at 80x24 until
+    // this fires, then gets the correct size in one shot.
+    document.fonts.ready.then(() => {
+      requestAnimationFrame(() => {
+        term.options.fontFamily = term.options.fontFamily;
+        safeFit();
+      });
+    });
 
     if (options.onData) {
       term.onData(options.onData);
@@ -99,19 +111,10 @@ export function useTerminal(options: UseTerminalOptions = {}) {
         options.onResize?.(cols, rows);
       });
     }
-
-    termRef.current = term;
-    fitRef.current = fitAddon;
-  }, [options.fontSize]);
+  }, [options.fontSize, safeFit]);
 
   const write = useCallback((data: string) => {
     termRef.current?.write(data);
-  }, []);
-
-  const fit = useCallback(() => {
-    try {
-      fitRef.current?.fit();
-    } catch {}
   }, []);
 
   const focus = useCallback(() => {
@@ -136,7 +139,7 @@ export function useTerminal(options: UseTerminalOptions = {}) {
     terminalRef,
     initTerminal,
     write,
-    fit,
+    fit: safeFit,
     focus,
     dispose,
     terminal: termRef,

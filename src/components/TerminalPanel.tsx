@@ -167,22 +167,11 @@ export function TerminalPanel({
     return () => observer.disconnect();
   }, [fit]);
 
-  // Force-propagate the actual terminal size to the PTY shortly after mount.
-  // The PTY starts at 80x24 but the xterm panel may be larger. The initial
-  // fit() triggers onResize, but if it races with session creation the resize
-  // can be lost. This delayed nudge guarantees the remote shell knows the
-  // correct dimensions.
+  // One delayed fit as a safety net — catches cases where fonts.ready
+  // resolved before the container had its final dimensions.
   useEffect(() => {
-    const t = setTimeout(() => {
-      fit();
-    }, 300);
-    const t2 = setTimeout(() => {
-      fit();
-    }, 1500);
-    return () => {
-      clearTimeout(t);
-      clearTimeout(t2);
-    };
+    const t = setTimeout(() => fit(), 500);
+    return () => clearTimeout(t);
   }, [fit]);
 
   useEffect(() => {
