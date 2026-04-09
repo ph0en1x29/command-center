@@ -145,31 +145,13 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
     );
   }
 
-  // ── Focus: all sessions rendered at full size, opacity:0 for inactive.
-  //    Terminals stay alive — no unmount/remount, no blank on switch.
-  //    The custom fit() with cols-1 prevents the text overflow that
-  //    absolute positioning caused before.
+  // ── Focus: single panel, normal flow (no absolute positioning — that
+  //    breaks FitAddon's col calculation). On tab switch the panel
+  //    remounts and loads the transcript tail so previous output shows.
   if (layoutMode === "focus" || visibleSessions.length === 1) {
-    const allSessions = Array.from(sessions.values());
-    const activeId = visibleSessions[0]?.id;
     return (
-      <div className="flex-1 p-1.5 bg-surface-0 min-h-0 relative">
-        {allSessions.map((s) => {
-          const active = s.id === activeId;
-          return (
-            <div
-              key={s.id}
-              className="absolute inset-1.5"
-              style={{
-                opacity: active ? 1 : 0,
-                pointerEvents: active ? "auto" : "none",
-                zIndex: active ? 1 : 0,
-              }}
-            >
-              {renderPanel(s, false)}
-            </div>
-          );
-        })}
+      <div className="flex-1 p-1.5 bg-surface-0 min-h-0">
+        {renderPanel(visibleSessions[0], false)}
       </div>
     );
   }

@@ -144,7 +144,16 @@ export function TerminalPanel({
 
   useEffect(() => {
     initTerminal();
-  }, [initTerminal]);
+    // Load recent output so the terminal shows content after remount.
+    // Then send Ctrl+L to the PTY to make the remote app redraw cleanly
+    // at the current terminal size (avoids garbled old-size content).
+    readTranscriptTail(session.id).then((tail) => {
+      if (tail) write(tail);
+      // Small delay so the fit() has time to set correct dimensions
+      // before asking the remote to redraw.
+      setTimeout(() => writeToSession(session.id, "\x0c"), 300);
+    }).catch(() => {});
+  }, [initTerminal, session.id, write, readTranscriptTail, writeToSession]);
 
   useEffect(() => {
     registerWriter?.(session.id, write);
