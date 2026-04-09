@@ -353,8 +353,9 @@ export function TerminalPanel({
         />
       )}
 
-      {/* Terminal body */}
-      <div ref={terminalRef} className="flex-1 bg-surface-0 min-h-0 overflow-hidden" />
+      {/* Terminal body — padding is here (not on .xterm) so FitAddon
+           and the WebGL canvas measure from the correct content box. */}
+      <div ref={terminalRef} className="flex-1 bg-surface-0 min-h-0 overflow-hidden p-2" />
 
       {/* Dangerous command modal */}
       {pendingDangerous && (

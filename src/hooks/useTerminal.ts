@@ -126,6 +126,11 @@ export function useTerminal(options: UseTerminalOptions = {}) {
 
   const fit = useCallback(() => {
     try {
+      // Re-assert font metrics before fitting — catches cases where the
+      // web font loaded between the last fit and now (layout switch, etc.)
+      if (termRef.current) {
+        termRef.current.options.fontFamily = termRef.current.options.fontFamily;
+      }
       fitRef.current?.fit();
     } catch {}
   }, []);

@@ -187,11 +187,11 @@ The Tauri builder is split: `.build()` returns the app, then `.run()` is called 
 
 ### Startup Command Timing
 
-Startup commands are typed into the PTY once the output contains a prompt-like suffix (`$`, `%`, `>`, `#`), which signals that the shell (and its `.zshrc`/`.bashrc`) has finished loading. The command is sent as `"{cmd}\r"` (with carriage return). The `startup_sent` flag prevents re-sending on reconnect. This replaced an earlier fixed 500ms delay that caused double-echo when readline/zle hadn't finished initialising yet.
+Startup commands are typed into the PTY once the output contains a prompt-like suffix (`$`, `%`, `>`, `#`) on the last line of ANSI-stripped output, with a 150ms delay for readline/zle initialisation. The command is sent as `"{cmd}\r"` (with carriage return). The `startup_sent` flag prevents re-sending on reconnect. ANSI stripping via `strip_ansi()` in lib.rs prevents false positives from escape sequences containing prompt-like characters.
 
-### Font Loading Race Condition
+### Font Loading and Terminal Display
 
-JetBrains Mono is loaded from Google Fonts with `display=swap`. xterm.js must not measure cell dimensions until the font is available, or the glyph atlas will be built with fallback-font metrics — causing text overlap and misaligned rendering. The `useTerminal` hook waits for `document.fonts.ready`, then forces a glyph atlas rebuild by re-assigning `fontFamily` before calling `fit()`. This mirrors how Ghostty waits for stable font metrics before computing the terminal grid.
+JetBrains Mono is loaded from Google Fonts with `display=swap`. CSS padding lives on the terminal wrapper div (`p-2` in TerminalPanel), **not** on `.xterm`, so the WebGL canvas and FitAddon both measure from a clean content box. Every `fit()` call forces an xterm.js glyph atlas rebuild by re-assigning `fontFamily`. On init, fitting waits for `document.fonts.ready`. This mirrors how Ghostty waits for stable font metrics before computing the terminal grid.
 
 ### Dangerous Command Line Buffer
 

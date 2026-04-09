@@ -160,6 +160,54 @@ fn slugify(s: &str) -> String {
         .collect()
 }
 
+/// Strip ANSI escape sequences (CSI, OSC, simple escapes) so we can
+/// inspect the visible text of PTY output.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            match chars.peek() {
+                Some('[') => {
+                    chars.next();
+                    // CSI: consume until a letter or @ through ~
+                    while let Some(&ch) = chars.peek() {
+                        chars.next();
+                        if ch.is_ascii_alphabetic() || ch == '~' || ch == '@' {
+                            break;
+                        }
+                    }
+                }
+                Some(']') => {
+                    chars.next();
+                    // OSC: consume until ST (\x1b\\) or BEL (\x07)
+                    while let Some(&ch) = chars.peek() {
+                        if ch == '\x07' {
+                            chars.next();
+                            break;
+                        }
+                        if ch == '\x1b' {
+                            chars.next();
+                            if chars.peek() == Some(&'\\') {
+                                chars.next();
+                            }
+                            break;
+                        }
+                        chars.next();
+                    }
+                }
+                _ => {
+                    // Simple escape — skip next char
+                    chars.next();
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 // ── Claude Code output parser ──────────────────────────────────────────
 
 fn detect_claude_status(line: &str) -> Option<(SessionStatus, Option<String>)> {
@@ -526,23 +574,36 @@ fn run_session_loop(
                         }
 
                         // ── Send startup command once we see a shell prompt ──
-                        // Instead of a fixed delay, we wait until the output
-                        // contains a prompt-like suffix ($ % > #) which means
-                        // the shell (and its .zshrc/.bashrc) has finished
-                        // loading and is ready for input.
+                        // We look for a line whose visible (non-ANSI) text
+                        // ends with a common prompt character ($ % > #).
+                        // To avoid false positives from MOTD or escape
+                        // sequences we strip ANSI codes before checking.
                         if !startup_sent {
-                            let trimmed = data.trim_end();
-                            if trimmed.ends_with('$')
-                                || trimmed.ends_with('%')
-                                || trimmed.ends_with('>')
-                                || trimmed.ends_with('#')
-                            {
-                                startup_sent = true;
-                                if let Some(ref sc) = startup_command {
-                                    let cmd_str = format!("{}\r", sc);
-                                    let mut sessions = state.sessions.lock();
-                                    if let Some(h) = sessions.get_mut(&session_id) {
-                                        let _ = h.writer.write_all(cmd_str.as_bytes());
+                            let stripped = strip_ansi(&data);
+                            let trimmed = stripped.trim_end();
+                            // Check the last line only
+                            if let Some(last_line) = trimmed.lines().last() {
+                                let lt = last_line.trim_end();
+                                if lt.ends_with('$')
+                                    || lt.ends_with('%')
+                                    || lt.ends_with('>')
+                                    || lt.ends_with('#')
+                                {
+                                    startup_sent = true;
+                                    if let Some(ref sc) = startup_command {
+                                        let cmd_str = format!("{}\r", sc);
+                                        let st = Arc::clone(&state);
+                                        let sid = session_id.clone();
+                                        // Small delay so the shell's line
+                                        // editor (zle/readline) is fully
+                                        // initialised before we type.
+                                        thread::spawn(move || {
+                                            thread::sleep(Duration::from_millis(150));
+                                            let mut sessions = st.sessions.lock();
+                                            if let Some(h) = sessions.get_mut(&sid) {
+                                                let _ = h.writer.write_all(cmd_str.as_bytes());
+                                            }
+                                        });
                                     }
                                 }
                             }
@@ -941,19 +1002,34 @@ fn close_session(
     session_id: String,
 ) -> Result<(), String> {
     if let Some(mut handle) = state.sessions.lock().remove(&session_id) {
-        // 1. Ask the shell / SSH / tmux to exit gracefully.
-        //    Send Ctrl-C first (abort any running command), then "exit\r".
+        // 1. Abort any running command, then ask every layer to exit.
         let _ = handle.writer.write_all(b"\x03");
+        // If tmux is wrapping, kill the remote tmux session so it
+        // doesn't linger for the next connection to re-attach to.
+        if handle.info.config.wrap_in_tmux {
+            let slug = slugify(&handle.info.config.name);
+            let kill_tmux = format!("tmux kill-session -t cc_{} 2>/dev/null\r", slug);
+            let _ = handle.writer.write_all(kill_tmux.as_bytes());
+        }
         let _ = handle.writer.write_all(b"exit\r");
         let _ = handle.writer.flush();
 
-        // 2. Kill the child process tree. On Unix this sends SIGHUP to the
-        //    process group leader, which propagates to all children (ssh,
-        //    remote shell, tmux client, etc.).
+        // 2. Kill the entire process group so all children (ssh, shell,
+        //    tmux client, etc.) are terminated.  On Unix portable-pty's
+        //    kill() sends SIGHUP; we also send SIGKILL to the process
+        //    group via libc to be thorough.
+        if let Some(pid) = handle.child.process_id() {
+            #[cfg(unix)]
+            unsafe {
+                // Kill the process group (negative pid).
+                libc::kill(-(pid as i32), libc::SIGHUP);
+                // Give processes a moment, then force-kill stragglers.
+                libc::kill(-(pid as i32), libc::SIGTERM);
+            }
+        }
         let _ = handle.child.kill();
 
-        // 3. Wait briefly so the OS can reap the zombie. Spawn a thread so
-        //    we don't block the Tauri command responder.
+        // 3. Reap the zombie in a background thread.
         thread::spawn(move || {
             let _ = handle.child.wait();
             // master and writer drop here, closing the PTY fd

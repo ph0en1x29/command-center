@@ -7,10 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
-- **Terminal text overlap**: xterm.js was measuring cell dimensions with a fallback monospace font before JetBrains Mono (loaded via Google Fonts `display=swap`) arrived, causing misaligned character rendering and overlapping text. The terminal now waits for `document.fonts.ready` before fitting, then forces a glyph atlas rebuild by re-assigning `fontFamily` — mirroring how Ghostty waits for stable font metrics before computing the grid.
-- **Terminal container overflow**: added `overflow-hidden` on the terminal body div and `height: 100%` on `.xterm` to prevent rendering bleed past container bounds during resize transitions.
-- **Startup command timing**: replaced the fixed 500ms delay with prompt detection (`$`, `%`, `>`, `#` suffix) so startup commands are typed only after the shell has finished loading `.zshrc`/`.bashrc`, avoiding double-echo when readline/zle hasn't initialised yet.
-- **Session close leaves orphan processes**: closing a session only removed it from the HashMap — the child process (shell, ssh, tmux) kept running. Now sends Ctrl-C + `exit`, kills the child process (SIGHUP on Unix propagates to the entire process group), and waits for reap in a background thread.
+- **Terminal text overlap / display corruption**: moved CSS padding from `.xterm` to the parent wrapper div so the WebGL canvas and FitAddon both measure from a clean content box. Added `width: 100%` and `height: 100%` on `.xterm` and `.xterm-screen`. Every `fit()` call now forces an xterm.js font re-measure (`fontFamily` re-assignment) to catch late web-font swaps. Initial fit waits for `document.fonts.ready` before computing the grid — mirroring Ghostty's approach.
+- **Double startup command entry**: prompt detection now strips ANSI escape sequences before checking for prompt suffixes (`$`, `%`, `>`, `#`), only inspects the last line, and adds a 150ms delay so readline/zle finishes initialising before the command is typed.
+- **Session close leaves orphan processes / won't exit**: closing a session now: (1) sends `tmux kill-session` if tmux wrapping is active to destroy the remote session, (2) sends Ctrl-C + `exit`, (3) kills the entire process group via `SIGHUP`+`SIGTERM` (not just the child PID), (4) reaps the zombie in a background thread. This prevents new sessions from reattaching to a stale tmux session.
 
 ## [0.1.0] - 2026-04-09
 
