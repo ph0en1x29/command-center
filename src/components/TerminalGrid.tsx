@@ -145,13 +145,28 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
     );
   }
 
-  // ── Focus: single panel, normal flow (no absolute positioning — that
-  //    breaks FitAddon's col calculation). On tab switch the panel
-  //    remounts and loads the transcript tail so previous output shows.
+  // ── Focus: ALL sessions in normal flow. Active gets flex:1 (full
+  //    height), inactive get height:0 + overflow:hidden (collapsed but
+  //    still mounted — xterm instance and buffer survive). No absolute
+  //    positioning (breaks col calculation). On activate, fit()+refresh()
+  //    resizes from 0 to correct dimensions and repaints the canvas.
   if (layoutMode === "focus" || visibleSessions.length === 1) {
+    const allSessions = Array.from(sessions.values());
+    const activeId = visibleSessions[0]?.id;
     return (
-      <div className="flex-1 p-1.5 bg-surface-0 min-h-0">
-        {renderPanel(visibleSessions[0], false)}
+      <div className="flex-1 p-1.5 bg-surface-0 min-h-0 flex flex-col">
+        {allSessions.map((s) => (
+          <div
+            key={s.id}
+            style={
+              s.id === activeId
+                ? { flex: 1, minHeight: 0 }
+                : { height: 0, overflow: "hidden" }
+            }
+          >
+            {renderPanel(s, false)}
+          </div>
+        ))}
       </div>
     );
   }

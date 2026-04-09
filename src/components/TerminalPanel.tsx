@@ -144,16 +144,7 @@ export function TerminalPanel({
 
   useEffect(() => {
     initTerminal();
-    // Load recent output so the terminal shows content after remount.
-    // Then send Ctrl+L to the PTY to make the remote app redraw cleanly
-    // at the current terminal size (avoids garbled old-size content).
-    readTranscriptTail(session.id).then((tail) => {
-      if (tail) write(tail);
-      // Small delay so the fit() has time to set correct dimensions
-      // before asking the remote to redraw.
-      setTimeout(() => writeToSession(session.id, "\x0c"), 300);
-    }).catch(() => {});
-  }, [initTerminal, session.id, write, readTranscriptTail, writeToSession]);
+  }, [initTerminal]);
 
   useEffect(() => {
     registerWriter?.(session.id, write);
@@ -180,11 +171,20 @@ export function TerminalPanel({
 
   useEffect(() => {
     if (isActive) {
-      setTimeout(() => {
+      // Panel just expanded from height:0 to flex:1. Wait for layout
+      // to settle, then fit (recalculate cols/rows for new size) and
+      // refresh (repaint the canvas which was paused at height:0).
+      const t1 = setTimeout(() => {
         fit();
+        try { terminal.current?.refresh(0, terminal.current.rows - 1); } catch {}
         focus();
         markViewed(session.id);
-      }, 50);
+      }, 80);
+      const t2 = setTimeout(() => {
+        fit();
+        try { terminal.current?.refresh(0, terminal.current.rows - 1); } catch {}
+      }, 300);
+      return () => { clearTimeout(t1); clearTimeout(t2); };
     }
   }, [isActive, focus, session.id, markViewed]);
 
