@@ -354,7 +354,7 @@ export function TerminalPanel({
       )}
 
       {/* Terminal body */}
-      <div ref={terminalRef} className="flex-1 bg-surface-0 min-h-0" />
+      <div ref={terminalRef} className="flex-1 bg-surface-0 min-h-0 overflow-hidden" />
 
       {/* Dangerous command modal */}
       {pendingDangerous && (

@@ -77,11 +77,34 @@ export function useTerminal(options: UseTerminalOptions = {}) {
       // canvas renderer is fine
     }
 
-    requestAnimationFrame(() => {
-      try {
-        fitAddon.fit();
-      } catch {}
-    });
+    // Wait for fonts (JetBrains Mono loaded via Google Fonts with display=swap)
+    // before fitting. Without this, xterm.js measures cell dimensions using a
+    // fallback monospace font, then the browser swaps in JetBrains Mono with
+    // different metrics — causing text overlap and misaligned rendering.
+    // This mirrors how Ghostty waits for stable font metrics before computing
+    // the terminal grid.
+    const fitAfterFonts = () => {
+      requestAnimationFrame(() => {
+        try {
+          // Force xterm.js to re-measure character cells by re-assigning
+          // fontFamily. This clears the glyph atlas and recalculates all
+          // cell dimensions based on the now-loaded web font.
+          term.options.fontFamily = term.options.fontFamily;
+          fitAddon.fit();
+        } catch {}
+      });
+    };
+
+    if (document.fonts.status === "loaded") {
+      fitAfterFonts();
+    } else {
+      // Fit immediately with whatever font is available so the terminal
+      // isn't blank, then re-fit once the real font arrives.
+      requestAnimationFrame(() => {
+        try { fitAddon.fit(); } catch {}
+      });
+      document.fonts.ready.then(fitAfterFonts);
+    }
 
     if (options.onData) {
       term.onData(options.onData);

@@ -514,23 +514,33 @@ fn run_session_loop(
                                     );
                                     prev_status = SessionStatus::Connected;
 
-                                    // Fire the startup command now that the
-                                    // shell is live. Short delay lets .zshrc
-                                    // finish loading so aliases work.
-                                    if !startup_sent {
-                                        startup_sent = true;
-                                        if let Some(ref sc) = startup_command {
-                                            let cmd_str = format!("{}\r", sc);
-                                            let sid = session_id.clone();
-                                            let st = Arc::clone(&state);
-                                            thread::spawn(move || {
-                                                thread::sleep(Duration::from_millis(500));
-                                                let mut sessions = st.sessions.lock();
-                                                if let Some(h) = sessions.get_mut(&sid) {
-                                                    let _ = h.writer.write_all(cmd_str.as_bytes());
-                                                }
-                                            });
-                                        }
+                                    // Mark that we should watch for a shell
+                                    // prompt before typing the startup command.
+                                    // (We no longer fire it on a fixed delay —
+                                    // that caused double-echo when zle/readline
+                                    // hadn't finished initialising yet.)
+                                }
+                            }
+                        }
+
+                        // ── Send startup command once we see a shell prompt ──
+                        // Instead of a fixed delay, we wait until the output
+                        // contains a prompt-like suffix ($ % > #) which means
+                        // the shell (and its .zshrc/.bashrc) has finished
+                        // loading and is ready for input.
+                        if !startup_sent {
+                            let trimmed = data.trim_end();
+                            if trimmed.ends_with('$')
+                                || trimmed.ends_with('%')
+                                || trimmed.ends_with('>')
+                                || trimmed.ends_with('#')
+                            {
+                                startup_sent = true;
+                                if let Some(ref sc) = startup_command {
+                                    let cmd_str = format!("{}\r", sc);
+                                    let mut sessions = state.sessions.lock();
+                                    if let Some(h) = sessions.get_mut(&session_id) {
+                                        let _ = h.writer.write_all(cmd_str.as_bytes());
                                     }
                                 }
                             }

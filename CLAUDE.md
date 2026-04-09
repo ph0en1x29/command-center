@@ -107,6 +107,7 @@ npx tsc --noEmit
 **hooks/useTerminal.ts** -- xterm.js lifecycle:
 - Creates Terminal with Ghostty theme, JetBrains Mono font, cursor blink, 10k scrollback, `macOptionIsMeta`
 - Loads FitAddon, WebLinksAddon, then attempts WebglAddon (with `onContextLoss` recovery and silent fallback)
+- Waits for `document.fonts.ready` before fitting; forces glyph atlas rebuild via `fontFamily` re-assignment to prevent text overlap from font-swap race
 - Exposes `initTerminal`, `write`, `fit`, `focus`, `dispose`
 - Cleanup handles WebGL addon throwing during StrictMode double-unmount
 
@@ -186,7 +187,11 @@ The Tauri builder is split: `.build()` returns the app, then `.run()` is called 
 
 ### Startup Command Timing
 
-Startup commands are typed into the PTY 500ms after the session transitions to Connected. This delay lets `.zshrc` / `.bashrc` finish loading so shell aliases and functions are available. The command is sent as `"{cmd}\r"` (with carriage return). The `startup_sent` flag prevents re-sending on reconnect.
+Startup commands are typed into the PTY once the output contains a prompt-like suffix (`$`, `%`, `>`, `#`), which signals that the shell (and its `.zshrc`/`.bashrc`) has finished loading. The command is sent as `"{cmd}\r"` (with carriage return). The `startup_sent` flag prevents re-sending on reconnect. This replaced an earlier fixed 500ms delay that caused double-echo when readline/zle hadn't finished initialising yet.
+
+### Font Loading Race Condition
+
+JetBrains Mono is loaded from Google Fonts with `display=swap`. xterm.js must not measure cell dimensions until the font is available, or the glyph atlas will be built with fallback-font metrics — causing text overlap and misaligned rendering. The `useTerminal` hook waits for `document.fonts.ready`, then forces a glyph atlas rebuild by re-assigning `fontFamily` before calling `fit()`. This mirrors how Ghostty waits for stable font metrics before computing the terminal grid.
 
 ### Dangerous Command Line Buffer
 
@@ -234,7 +239,7 @@ Transcripts are raw PTY output and can grow large (especially with Claude Code p
 
 ### Why startup commands are typed into the PTY
 
-Startup commands (like `claude`) are sent as keystrokes into the live PTY after Connected, rather than being appended to the shell command. This means they run in the interactive shell context where aliases, functions, and `.zshrc` customizations are available. Appending to the command builder would run them before the interactive shell loads.
+Startup commands (like `claude`) are sent as keystrokes into the live PTY after the shell prompt appears, rather than being appended to the shell command. This means they run in the interactive shell context where aliases, functions, and `.zshrc` customizations are available. Appending to the command builder would run them before the interactive shell loads. The prompt is detected by checking for a trailing `$`, `%`, `>`, or `#` in the PTY output.
 
 ### Why tmux wrapping uses graceful fallback
 

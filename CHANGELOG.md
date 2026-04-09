@@ -3,6 +3,14 @@
 All notable changes to Command Center are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.1] - 2026-04-09
+
+### Fixed
+
+- **Terminal text overlap**: xterm.js was measuring cell dimensions with a fallback monospace font before JetBrains Mono (loaded via Google Fonts `display=swap`) arrived, causing misaligned character rendering and overlapping text. The terminal now waits for `document.fonts.ready` before fitting, then forces a glyph atlas rebuild by re-assigning `fontFamily` — mirroring how Ghostty waits for stable font metrics before computing the grid.
+- **Terminal container overflow**: added `overflow-hidden` on the terminal body div and `height: 100%` on `.xterm` to prevent rendering bleed past container bounds during resize transitions.
+- **Startup command timing**: replaced the fixed 500ms delay with prompt detection (`$`, `%`, `>`, `#` suffix) so startup commands are typed only after the shell has finished loading `.zshrc`/`.bashrc`, avoiding double-echo when readline/zle hasn't initialised yet.
+
 ## [0.1.0] - 2026-04-09
 
 Initial public release.
@@ -109,5 +117,5 @@ Initial public release.
 - Zustand session store: sessions Map, activeSessionId, focusedSessionIds, layoutMode, sidebarOpen, broadcastMode, broadcastTargets, lastSeenBytes for activity badges
 - Zustand profile store: wraps Tauri profile commands with loading/error state
 - useSession hook: wraps all Tauri invoke calls with broadcast fan-out logic
-- useTerminal hook: xterm.js lifecycle with Ghostty theme, WebGL addon (with context-loss recovery and fallback), FitAddon, WebLinksAddon
+- useTerminal hook: xterm.js lifecycle with Ghostty theme, WebGL addon (with context-loss recovery and fallback), FitAddon, WebLinksAddon, font-ready gating
 - useTick hook: interval-based re-render trigger for live duration displays
