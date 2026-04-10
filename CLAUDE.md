@@ -21,7 +21,7 @@ Command Center is a native macOS desktop application for managing multiple SSH a
 - **Lucide React** for icons
 - **date-fns** for time formatting
 
-The app identifier is `com.jay.commandcenter`. The current version is 0.1.0.
+The app identifier is `com.jay.commandcenter`. The current version is 26.4.9 (CalVer: YY.M.D).
 
 ---
 
