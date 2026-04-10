@@ -203,6 +203,47 @@ fn strip_ansi(s: &str) -> String {
     out
 }
 
+/// Decode PTY bytes without corrupting multibyte UTF-8 characters that land
+/// across `read()` boundaries. Invalid byte sequences are still surfaced as
+/// replacement characters, but incomplete trailing sequences are held until
+/// the next chunk arrives.
+fn decode_utf8_stream(pending: &mut Vec<u8>, chunk: &[u8]) -> String {
+    pending.extend_from_slice(chunk);
+
+    let mut out = String::new();
+    loop {
+        match std::str::from_utf8(pending.as_slice()) {
+            Ok(valid) => {
+                out.push_str(valid);
+                pending.clear();
+                break;
+            }
+            Err(err) => {
+                let valid_up_to = err.valid_up_to();
+                if valid_up_to > 0 {
+                    out.push_str(std::str::from_utf8(&pending[..valid_up_to]).unwrap_or(""));
+                }
+
+                match err.error_len() {
+                    Some(error_len) => {
+                        out.push(char::REPLACEMENT_CHARACTER);
+                        pending.drain(..valid_up_to + error_len);
+                        if pending.is_empty() {
+                            break;
+                        }
+                    }
+                    None => {
+                        pending.drain(..valid_up_to);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    out
+}
+
 // ── Claude Code output parser ──────────────────────────────────────────
 
 fn detect_claude_status(line: &str) -> Option<(SessionStatus, Option<String>)> {
@@ -490,6 +531,7 @@ fn run_session_loop(
         let mut writes_since_truncate_check: u32 = 0;
         let mut notification_count: u32 = 0;
         let mut startup_sent = startup_command.is_none(); // true if nothing to send
+        let mut pending_utf8 = Vec::new();
 
         loop {
             let mut buf = [0u8; 4096];
@@ -501,7 +543,7 @@ fn run_session_loop(
                     Ok(0) => break "eof",
                     Ok(n) => {
                         let chunk = &buf[..n];
-                        let data = String::from_utf8_lossy(chunk).to_string();
+                        let data = decode_utf8_stream(&mut pending_utf8, chunk);
 
                         // Persist transcript
                         if let Some(ref path) = transcript {
@@ -519,13 +561,15 @@ fn run_session_loop(
                             }
                         }
 
-                        let _ = app_handle.emit(
-                            "session-output",
-                            SessionOutput {
-                                session_id: session_id.clone(),
-                                data: data.clone(),
-                            },
-                        );
+                        if !data.is_empty() {
+                            let _ = app_handle.emit(
+                                "session-output",
+                                SessionOutput {
+                                    session_id: session_id.clone(),
+                                    data: data.clone(),
+                                },
+                            );
+                        }
 
                         // Update stats + connecting→connected
                         {
@@ -609,43 +653,45 @@ fn run_session_loop(
                         }
 
                         // Line-buffered Claude state parsing
-                        line_buf.push_str(&data);
-                        while let Some(newline_pos) = line_buf.find('\n') {
-                            let line = line_buf[..newline_pos].to_string();
-                            line_buf = line_buf[newline_pos + 1..].to_string();
+                        if !data.is_empty() {
+                            line_buf.push_str(&data);
+                            while let Some(newline_pos) = line_buf.find('\n') {
+                                let line = line_buf[..newline_pos].to_string();
+                                line_buf = line_buf[newline_pos + 1..].to_string();
 
-                            if let Some((status, task)) = detect_claude_status(&line) {
-                                let (session_name, notif_level) = {
-                                    let mut sessions = state.sessions.lock();
-                                    let info = sessions.get(&session_id).map(|h| {
-                                        (h.info.config.name.clone(), h.info.config.notification_level.clone())
-                                    }).unwrap_or_default();
-                                    if let Some(handle) = sessions.get_mut(&session_id) {
-                                        handle.info.status = status.clone();
-                                        handle.info.current_task = task.clone();
-                                        handle.info.lines_processed += 1;
-                                    }
-                                    info
-                                };
+                                if let Some((status, task)) = detect_claude_status(&line) {
+                                    let (session_name, notif_level) = {
+                                        let mut sessions = state.sessions.lock();
+                                        let info = sessions.get(&session_id).map(|h| {
+                                            (h.info.config.name.clone(), h.info.config.notification_level.clone())
+                                        }).unwrap_or_default();
+                                        if let Some(handle) = sessions.get_mut(&session_id) {
+                                            handle.info.status = status.clone();
+                                            handle.info.current_task = task.clone();
+                                            handle.info.lines_processed += 1;
+                                        }
+                                        info
+                                    };
 
-                                let _ = app_handle.emit(
-                                    "session-status",
-                                    StatusUpdate {
-                                        session_id: session_id.clone(),
-                                        status: status.clone(),
-                                        task: task.clone(),
-                                        timestamp: Utc::now(),
-                                    },
-                                );
-                                notify_status_transition(
-                                    &app_handle,
-                                    &session_name,
-                                    &prev_status,
-                                    &status,
-                                    &notif_level,
-                                    &mut notification_count,
-                                );
-                                prev_status = status;
+                                    let _ = app_handle.emit(
+                                        "session-status",
+                                        StatusUpdate {
+                                            session_id: session_id.clone(),
+                                            status: status.clone(),
+                                            task: task.clone(),
+                                            timestamp: Utc::now(),
+                                        },
+                                    );
+                                    notify_status_transition(
+                                        &app_handle,
+                                        &session_name,
+                                        &prev_status,
+                                        &status,
+                                        &notif_level,
+                                        &mut notification_count,
+                                    );
+                                    prev_status = status;
+                                }
                             }
                         }
                     }
@@ -654,6 +700,7 @@ fn run_session_loop(
             };
 
             let _ = exit_reason; // (intentionally unused — both paths fall through to reconnect logic)
+            pending_utf8.clear();
 
             // ── Decide whether to reconnect ──
             let (should_reconnect, config_for_reconnect, session_name) = {

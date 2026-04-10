@@ -146,6 +146,13 @@ export function TerminalPanel({
     initTerminal();
   }, [initTerminal]);
 
+  const syncTerminalSize = useCallback(() => {
+    const dims = fit();
+    if (dims) {
+      resizeSession(session.id, dims.cols, dims.rows);
+    }
+  }, [fit, resizeSession, session.id]);
+
   useEffect(() => {
     registerWriter?.(session.id, write);
     return () => {
@@ -156,18 +163,18 @@ export function TerminalPanel({
   useEffect(() => {
     if (!containerRef.current) return;
     const observer = new ResizeObserver(() => {
-      requestAnimationFrame(() => fit());
+      requestAnimationFrame(() => syncTerminalSize());
     });
     observer.observe(containerRef.current);
     return () => observer.disconnect();
-  }, [fit]);
+  }, [syncTerminalSize]);
 
   // One delayed fit as a safety net — catches cases where fonts.ready
   // resolved before the container had its final dimensions.
   useEffect(() => {
-    const t = setTimeout(() => fit(), 500);
+    const t = setTimeout(() => syncTerminalSize(), 500);
     return () => clearTimeout(t);
-  }, [fit]);
+  }, [syncTerminalSize]);
 
   useEffect(() => {
     if (isActive) {
@@ -175,18 +182,18 @@ export function TerminalPanel({
       // to settle, then fit (recalculate cols/rows for new size) and
       // refresh (repaint the canvas which was paused at height:0).
       const t1 = setTimeout(() => {
-        fit();
+        syncTerminalSize();
         try { terminal.current?.refresh(0, terminal.current.rows - 1); } catch {}
         focus();
         markViewed(session.id);
       }, 80);
       const t2 = setTimeout(() => {
-        fit();
+        syncTerminalSize();
         try { terminal.current?.refresh(0, terminal.current.rows - 1); } catch {}
       }, 300);
       return () => { clearTimeout(t1); clearTimeout(t2); };
     }
-  }, [isActive, focus, session.id, markViewed]);
+  }, [isActive, focus, session.id, markViewed, syncTerminalSize]);
 
   const now = Date.now();
   const uptimeMs = session.connected_at ? now - new Date(session.connected_at).getTime() : 0;
@@ -246,7 +253,7 @@ export function TerminalPanel({
       ref={containerRef}
       data-session-id={session.id}
       onClick={onFocus}
-      className={`relative flex flex-col h-full rounded-xl overflow-hidden border-2 transition-colors ${borderClass}`}
+      className={`relative flex flex-col h-full w-full min-h-0 min-w-0 rounded-xl overflow-hidden border-2 transition-colors ${borderClass}`}
     >
       {/* Broadcast badge (kept — broadcast needs to be unmissable) */}
       {isBroadcasting && (
@@ -408,7 +415,7 @@ export function TerminalPanel({
       )}
 
       {/* Terminal body */}
-      <div ref={terminalRef} className="flex-1 bg-surface-0 min-h-0 overflow-hidden" />
+      <div ref={terminalRef} className="flex-1 bg-surface-0 min-h-0 min-w-0 overflow-hidden" />
 
       {/* Dangerous command modal */}
       {pendingDangerous && (

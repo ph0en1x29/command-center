@@ -39,11 +39,88 @@ export function useTerminal(options: UseTerminalOptions = {}) {
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
 
-  const fit = useCallback(() => {
+  const remeasureFont = useCallback((term: Terminal | null = termRef.current) => {
+    if (!term) return;
     try {
-      fitRef.current?.fit();
+      term.options.fontFamily = term.options.fontFamily;
     } catch {}
   }, []);
+
+  const fit = useCallback(() => {
+    const term = termRef.current;
+    if (!term) return null;
+
+    remeasureFont(term);
+
+    try {
+      let cols: number | undefined;
+      let rows: number | undefined;
+
+      // ── Ghostty-style grid sizing ──────────────────────────────────
+      // FitAddon uses a hardcoded FALLBACK_SCROLL_BAR_WIDTH (~15 px)
+      // that mis-reports columns on macOS overlay scrollbars (0 px real
+      // width).  Instead, measure the actual cell dimensions from
+      // xterm's render service, the actual container size, and the
+      // actual scrollbar width — then floor-divide so we never report
+      // more cols/rows than physically fit.
+      const core = (term as any)._core;
+      const renderDims = core?._renderService?.dimensions;
+      const el = term.element;
+
+      if (renderDims?.css?.cell?.width > 0 && renderDims?.css?.cell?.height > 0 && el?.parentElement) {
+        const cellW: number = renderDims.css.cell.width;
+        const cellH: number = renderDims.css.cell.height;
+
+        // clientWidth is integer (excludes border); getBoundingClientRect
+        // gives sub-pixel float.  Take the minimum so we never over-count
+        // when the browser rounds clientWidth up on a fractional layout.
+        const rect = el.parentElement.getBoundingClientRect();
+        const parentW = Math.min(el.parentElement.clientWidth, rect.width);
+        const parentH = Math.min(el.parentElement.clientHeight, rect.height);
+
+        // .xterm element padding (usually 0)
+        const cs = window.getComputedStyle(el);
+        const padH = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+        const padV = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+
+        // Real scrollbar width (0 on macOS overlay scrollbars)
+        const viewport = el.querySelector('.xterm-viewport') as HTMLElement | null;
+        const scrollbarW = viewport ? viewport.offsetWidth - viewport.clientWidth : 0;
+
+        // ── 1 px safety margin ──────────────────────────────────────
+        // Ghostty sizes its surface to exactly cols*cellW and turns the
+        // remainder into padding.  We can't resize the container, so
+        // instead reserve 1 CSS px before dividing.  This absorbs:
+        //   • IEEE 754 edge: floor(w/cw)*cw can exceed w by a fraction
+        //   • clientWidth rounding up a fractional layout width
+        //   • sub-pixel font rendering needing a sliver of extra space
+        // Cost: ≤1 px of empty space at the right edge (invisible).
+        const availW = parentW - padH - scrollbarW - 1;
+        const availH = parentH - padV;
+
+        cols = Math.max(2, Math.floor(availW / cellW));
+        rows = Math.max(1, Math.floor(availH / cellH));
+      }
+
+      // Fallback to FitAddon when render dimensions aren't available yet
+      // (e.g. before the first paint)
+      if (cols == null || rows == null) {
+        const fitAddon = fitRef.current;
+        if (!fitAddon) return null;
+        const proposed = fitAddon.proposeDimensions();
+        if (!proposed) return null;
+        cols = proposed.cols;
+        rows = proposed.rows;
+      }
+
+      if (term.cols !== cols || term.rows !== rows) {
+        term.resize(cols, rows);
+      }
+      return { cols: term.cols, rows: term.rows };
+    } catch {
+      return null;
+    }
+  }, [remeasureFont]);
 
   const initTerminal = useCallback(() => {
     if (!terminalRef.current) return;
@@ -58,9 +135,9 @@ export function useTerminal(options: UseTerminalOptions = {}) {
       cursorBlink: true,
       cursorStyle: "block",
       fontSize: options.fontSize || 12,
-      fontFamily: '"JetBrains Mono", Menlo, "SF Mono", monospace',
+      fontFamily: '"JetBrains Mono", "Fira Code", "DejaVu Sans Mono", Menlo, "SF Mono", monospace',
       fontWeight: "400",
-      lineHeight: 1.0,
+      lineHeight: 1.15,
       letterSpacing: 0,
       theme: GHOSTTY_THEME,
       allowProposedApi: true,
@@ -78,11 +155,13 @@ export function useTerminal(options: UseTerminalOptions = {}) {
     termRef.current = term;
     fitRef.current = fitAddon;
 
-    document.fonts.ready.then(() => {
+    const fontsReady = typeof document !== "undefined" && "fonts" in document
+      ? document.fonts.ready
+      : Promise.resolve();
+
+    fontsReady.then(() => {
       requestAnimationFrame(() => {
-        try {
-          term.options.fontFamily = term.options.fontFamily;
-        } catch {}
+        remeasureFont(term);
         fit();
       });
     });
@@ -96,7 +175,7 @@ export function useTerminal(options: UseTerminalOptions = {}) {
         options.onResize?.(cols, rows);
       });
     }
-  }, [options.fontSize, fit]);
+  }, [options.fontSize, fit, remeasureFont]);
 
   const write = useCallback((data: string) => {
     termRef.current?.write(data);

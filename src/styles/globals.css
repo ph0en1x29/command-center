@@ -48,7 +48,32 @@ html, body, #root {
    origin, breaking cursor-addressed TUI rendering (the cursor position
    and the visual position would be out of sync). */
 .xterm {
+  box-sizing: content-box !important;
+  width: 100% !important;
   height: 100% !important;
+}
+.xterm *,
+.xterm *::before,
+.xterm *::after {
+  box-sizing: content-box !important;
+}
+.xterm .xterm-screen,
+.xterm .xterm-viewport {
+  width: 100% !important;
+  height: 100% !important;
+}
+.xterm .xterm-screen canvas {
+  display: block;
+}
+.xterm .xterm-rows,
+.xterm .xterm-rows span,
+.xterm .xterm-helper-textarea,
+.xterm .xterm-char-measure-element,
+.xterm .xterm-width-cache-measure-container {
+  font-feature-settings: normal !important;
+  font-variation-settings: normal !important;
+  font-kerning: none !important;
+  text-transform: none !important;
 }
 
 

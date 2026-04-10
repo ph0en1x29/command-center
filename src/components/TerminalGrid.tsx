@@ -70,6 +70,29 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
     return all; // monitor
   }, [sessions, activeSessionId, focusedSessionIds, layoutMode]);
 
+  // ── Slot overrides: maps slot index → session id for split/grid pickers ──
+  // (must be before the early return so hooks are called in stable order)
+  const [slotOverrides, setSlotOverrides] = useState<Map<number, string>>(new Map());
+
+  const handleSwap = useCallback((slotIndex: number, newSessionId: string) => {
+    setSlotOverrides((prev) => {
+      const next = new Map(prev);
+      next.set(slotIndex, newSessionId);
+      return next;
+    });
+  }, []);
+
+  const resolveSlot = useCallback(
+    (slotIndex: number, defaultSession: SessionInfo | undefined): SessionInfo | undefined => {
+      const overrideId = slotOverrides.get(slotIndex);
+      if (overrideId) {
+        return sessions.get(overrideId) ?? defaultSession;
+      }
+      return defaultSession;
+    },
+    [slotOverrides, sessions]
+  );
+
   if (visibleSessions.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center bg-surface-0">
@@ -82,29 +105,6 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
       </div>
     );
   }
-
-  // ── Slot overrides: maps slot index → session id for split/grid pickers ──
-  const [slotOverrides, setSlotOverrides] = useState<Map<number, string>>(new Map());
-
-  const handleSwap = useCallback((slotIndex: number, newSessionId: string) => {
-    setSlotOverrides((prev) => {
-      const next = new Map(prev);
-      next.set(slotIndex, newSessionId);
-      return next;
-    });
-  }, []);
-
-  // Resolve which session to show in a given slot (override or default)
-  const resolveSlot = useCallback(
-    (slotIndex: number, defaultSession: SessionInfo | undefined): SessionInfo | undefined => {
-      const overrideId = slotOverrides.get(slotIndex);
-      if (overrideId) {
-        return sessions.get(overrideId) ?? defaultSession;
-      }
-      return defaultSession;
-    },
-    [slotOverrides, sessions]
-  );
 
   const renderPanel = (session: SessionInfo, compact: boolean) => (
     <TerminalPanel
@@ -145,9 +145,29 @@ export function TerminalGrid({ outputHandlers }: TerminalGridProps) {
     );
   }
 
-  // ── Focus: single panel, no wrappers. This is the only layout that
-  //    renders text correctly — any wrapper div breaks col calculation.
-  if (layoutMode === "focus" || visibleSessions.length === 1) {
+  // ── Focus: keep ALL sessions mounted so switching never destroys
+  //    terminal state or drops output.  Only the active panel is visible;
+  //    hidden panels continue receiving output via their registered writers.
+  if (layoutMode === "focus") {
+    const allSessions = Array.from(sessions.values());
+    return (
+      <div className="flex-1 bg-surface-0 min-h-0 relative">
+        {allSessions.map((session) => (
+          <div
+            key={session.id}
+            className={`absolute inset-0 p-1.5 ${
+              session.id === activeSessionId ? "z-10" : "z-0 invisible"
+            }`}
+          >
+            {renderPanel(session, false)}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // Single visible session (non-focus layouts)
+  if (visibleSessions.length === 1) {
     return (
       <div className="flex-1 p-1.5 bg-surface-0 min-h-0">
         {renderPanel(visibleSessions[0], false)}
