@@ -1,5 +1,6 @@
 # Command Center
 
+[![CI](https://github.com/ph0en1x29/command-center/actions/workflows/ci.yml/badge.svg)](https://github.com/ph0en1x29/command-center/actions/workflows/ci.yml)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-blue?logo=tauri)](https://v2.tauri.app)
 [![React 18](https://img.shields.io/badge/React-18-61dafb?logo=react)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?logo=typescript)](https://www.typescriptlang.org)
@@ -8,6 +9,13 @@
 A native macOS desktop application for managing multiple SSH and local terminal sessions with built-in Claude Code awareness. Built with Tauri 2 (Rust) and React.
 
 Command Center gives you a single pane of glass for running Claude Code across many machines at once. It tracks what each session is doing (Thinking, Writing, Running Command, Idle, Error), sends native macOS notifications on state changes, and provides six layout modes so you can arrange sessions however your workflow demands.
+
+<!-- Add a screenshot or GIF here — this is the single most impactful thing for discoverability.
+     Capture the app in Grid or Monitor layout with a few sessions running Claude Code.
+     Recommended: GIF (20-30s demo) or PNG (1280x800+).
+     Place the image in an assets/ directory and reference it like:
+     ![Command Center](assets/screenshot.png)
+-->
 
 ---
 

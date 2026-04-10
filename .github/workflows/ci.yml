@@ -1,15 +1,14 @@
-name: Release
+name: CI
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
-  build-and-release:
+  check:
     runs-on: macos-latest
-    permissions:
-      contents: write
 
     steps:
       - name: Checkout
@@ -32,15 +31,8 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
-      - name: Install create-dmg
-        run: brew install create-dmg
+      - name: TypeScript type check
+        run: npx tsc --noEmit
 
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Command Center ${{ github.ref_name }}'
-          releaseDraft: true
-          prerelease: false
+      - name: Rust check
+        run: cd src-tauri && cargo check
