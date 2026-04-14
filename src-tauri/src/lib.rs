@@ -121,6 +121,10 @@ struct SessionHandle {
     writer: Box<dyn Write + Send>,
     _master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send>,
+    // Last (cols, rows) forwarded to the PTY.  Used to suppress no-op
+    // resizes that would otherwise fire a redundant ioctl/SIGWINCH and
+    // interrupt an in-flight TUI redraw on the remote side.
+    last_size: Option<(u16, u16)>,
 }
 
 // ── App State ──────────────────────────────────────────────────────────
@@ -775,6 +779,8 @@ fn run_session_loop(
                             handle.writer = writer;
                             handle._master = master;
                             handle.child = new_child;
+                            // Fresh PTY starts at 80x24; next frontend sync resizes it.
+                            handle.last_size = None;
                             handle.info.reconnect_count += 1;
                             handle.info.last_activity = Utc::now();
                         }
@@ -964,6 +970,7 @@ fn create_session(
         writer,
         _master: master,
         child,
+        last_size: None,
     };
 
     state.sessions.lock().insert(id.clone(), handle);
@@ -983,6 +990,61 @@ fn create_session(
 }
 
 #[tauri::command]
+fn reconnect_session(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    session_id: String,
+) -> Result<(), String> {
+    let config = {
+        let mut sessions = state.sessions.lock();
+        let handle = sessions.get_mut(&session_id).ok_or("Session not found")?;
+        if !matches!(handle.info.status, SessionStatus::Disconnected) {
+            return Err("Session is not disconnected".to_string());
+        }
+        handle.info.status = SessionStatus::Connecting;
+        handle.info.config.clone()
+    };
+
+    let _ = app.emit(
+        "session-status",
+        StatusUpdate {
+            session_id: session_id.clone(),
+            status: SessionStatus::Connecting,
+            task: None,
+            timestamp: Utc::now(),
+        },
+    );
+
+    let (master, writer, reader, child) = spawn_pty(&config, &session_id)?;
+
+    {
+        let mut sessions = state.sessions.lock();
+        if let Some(handle) = sessions.get_mut(&session_id) {
+            handle.writer = writer;
+            handle._master = master;
+            handle.child = child;
+            // Fresh PTY starts at 80x24; next frontend sync resizes it.
+            handle.last_size = None;
+            handle.info.reconnect_count += 1;
+            handle.info.last_activity = Utc::now();
+        }
+    }
+
+    let transcript = transcript_path(&app, &session_id);
+    let startup_cmd = config.startup_command.clone().filter(|s| !s.is_empty());
+    run_session_loop(
+        app,
+        Arc::clone(&*state),
+        session_id,
+        reader,
+        transcript,
+        startup_cmd,
+    );
+
+    Ok(())
+}
+
+#[tauri::command]
 fn write_to_session(
     state: State<'_, Arc<AppState>>,
     session_id: String,
@@ -992,6 +1054,10 @@ fn write_to_session(
     let handle = sessions
         .get_mut(&session_id)
         .ok_or("Session not found")?;
+
+    if matches!(handle.info.status, SessionStatus::Disconnected) {
+        return Err("Session disconnected".to_string());
+    }
 
     let bytes = data.as_bytes();
     handle
@@ -1025,8 +1091,15 @@ fn resize_session(
     cols: u16,
     rows: u16,
 ) -> Result<(), String> {
-    let sessions = state.sessions.lock();
-    let handle = sessions.get(&session_id).ok_or("Session not found")?;
+    let mut sessions = state.sessions.lock();
+    let handle = sessions.get_mut(&session_id).ok_or("Session not found")?;
+
+    // Suppress no-op resizes: the frontend already gates this, but a
+    // belt-and-braces check here prevents any stray call from firing
+    // an ioctl+SIGWINCH that could interrupt a remote TUI redraw.
+    if handle.last_size == Some((cols, rows)) {
+        return Ok(());
+    }
 
     handle
         ._master
@@ -1037,6 +1110,8 @@ fn resize_session(
             pixel_height: 0,
         })
         .map_err(|e| format!("Resize failed: {}", e))?;
+
+    handle.last_size = Some((cols, rows));
 
     Ok(())
 }
@@ -1258,6 +1333,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             create_session,
+            reconnect_session,
             write_to_session,
             resize_session,
             close_session,

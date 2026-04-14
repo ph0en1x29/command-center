@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
 
 interface UseTerminalOptions {
   onData?: (data: string) => void;
@@ -151,6 +152,20 @@ export function useTerminal(options: UseTerminalOptions = {}) {
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
     term.open(terminalRef.current);
+
+    // Try WebGL renderer first — the DOM renderer is slow and produces
+    // visible glitches when a cursor-addressed TUI (Claude Code's task
+    // list, tmux, htop, etc.) updates rapidly.  On context loss we drop
+    // the addon and silently fall back to the DOM renderer.
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => {
+        try { webgl.dispose(); } catch {}
+      });
+      term.loadAddon(webgl);
+    } catch {
+      // WebGL unavailable (headless, old GPU, disabled) — DOM renderer takes over.
+    }
 
     termRef.current = term;
     fitRef.current = fitAddon;

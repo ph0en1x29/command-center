@@ -146,11 +146,20 @@ export function TerminalPanel({
     initTerminal();
   }, [initTerminal]);
 
+  // Track the last dims forwarded to the PTY so we don't spam the
+  // backend — every resize_session call becomes a SIGWINCH to the
+  // remote process, which interrupts in-flight TUI redraws and can
+  // shred the visible buffer when several fire in quick succession
+  // (sidebar toggles, layout changes, StrictMode remounts).
+  const lastSentSize = useRef<{ cols: number; rows: number } | null>(null);
+
   const syncTerminalSize = useCallback(() => {
     const dims = fit();
-    if (dims) {
-      resizeSession(session.id, dims.cols, dims.rows);
-    }
+    if (!dims) return;
+    const prev = lastSentSize.current;
+    if (prev && prev.cols === dims.cols && prev.rows === dims.rows) return;
+    lastSentSize.current = dims;
+    resizeSession(session.id, dims.cols, dims.rows);
   }, [fit, resizeSession, session.id]);
 
   useEffect(() => {
@@ -162,36 +171,42 @@ export function TerminalPanel({
 
   useEffect(() => {
     if (!containerRef.current) return;
+    // Debounce resize observations — sidebar toggles and layout
+    // animations produce a burst of ResizeObserver callbacks, and
+    // firing fit()+resize_session on every one was hammering the
+    // remote TUI with SIGWINCH mid-redraw.  A small settle window
+    // collapses the burst into one resize after the layout quiesces.
+    let pending: ReturnType<typeof setTimeout> | null = null;
     const observer = new ResizeObserver(() => {
-      requestAnimationFrame(() => syncTerminalSize());
+      if (pending) clearTimeout(pending);
+      pending = setTimeout(() => {
+        pending = null;
+        requestAnimationFrame(() => syncTerminalSize());
+      }, 50);
     });
     observer.observe(containerRef.current);
-    return () => observer.disconnect();
-  }, [syncTerminalSize]);
-
-  // One delayed fit as a safety net — catches cases where fonts.ready
-  // resolved before the container had its final dimensions.
-  useEffect(() => {
-    const t = setTimeout(() => syncTerminalSize(), 500);
-    return () => clearTimeout(t);
+    return () => {
+      if (pending) clearTimeout(pending);
+      observer.disconnect();
+    };
   }, [syncTerminalSize]);
 
   useEffect(() => {
     if (isActive) {
-      // Panel just expanded from height:0 to flex:1. Wait for layout
-      // to settle, then fit (recalculate cols/rows for new size) and
-      // refresh (repaint the canvas which was paused at height:0).
+      // Panel just became active.  In focus layout the panel never
+      // changed dimensions (all panels are absolute inset-0), so we
+      // don't need to resync size — just repaint the canvas which
+      // may have been paused while the panel was hidden, then focus.
+      // syncTerminalSize() is a no-op when dims haven't changed, so
+      // we still call it once as a safety net for layouts where the
+      // panel really did resize.
       const t1 = setTimeout(() => {
         syncTerminalSize();
         try { terminal.current?.refresh(0, terminal.current.rows - 1); } catch {}
         focus();
         markViewed(session.id);
       }, 80);
-      const t2 = setTimeout(() => {
-        syncTerminalSize();
-        try { terminal.current?.refresh(0, terminal.current.rows - 1); } catch {}
-      }, 300);
-      return () => { clearTimeout(t1); clearTimeout(t2); };
+      return () => clearTimeout(t1);
     }
   }, [isActive, focus, session.id, markViewed, syncTerminalSize]);
 

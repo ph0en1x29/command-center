@@ -33,9 +33,28 @@ export function useSession() {
     [removeSession]
   );
 
+  const reconnectSession = useCallback(
+    async (sessionId: string) => {
+      try {
+        await invoke("reconnect_session", { sessionId });
+      } catch (err) {
+        console.error("Failed to reconnect session:", err);
+      }
+    },
+    []
+  );
+
   const writeToSession = useCallback(
     async (sessionId: string, data: string) => {
       try {
+        // Auto-reconnect if the session is disconnected
+        const session = useSessionStore.getState().sessions.get(sessionId);
+        if (session?.status === "Disconnected") {
+          await invoke("reconnect_session", { sessionId });
+          // Small delay for PTY to be ready
+          await new Promise((r) => setTimeout(r, 300));
+        }
+
         // Broadcast: if mode is on and this session is a target, fan-out to all targets
         const { broadcastMode, broadcastTargets } = useSessionStore.getState();
         if (broadcastMode && broadcastTargets.has(sessionId) && broadcastTargets.size > 1) {
@@ -123,6 +142,7 @@ export function useSession() {
   return {
     createSession,
     closeSession,
+    reconnectSession,
     writeToSession,
     resizeSession,
     setKeepAwake,
